@@ -1,5 +1,7 @@
 #include <Arduino.h>
+#include <Arduino_FreeRTOS.h>
 
+#include <Adafruit_ADS1X15.h>
 #include "UTFT.h"
 #include "ModbusRtu.h"
 
@@ -36,7 +38,8 @@ UTFT myGLCD(TFT01_24SP, dispMISO,
 			dispSCK, dispCS,
 			dispRST, dispDC);
 
-enum RotateDirections {
+enum RotateDirections
+{
 	CLOCKWISE,
 	COUNTERCLOCKWISE
 };
@@ -66,6 +69,15 @@ bool is_new_modbus_message_ready = false;
 
 unsigned long u32wait;
 
+Adafruit_ADS1115 ads;
+const uint16_t READY_PIN = 24;
+
+volatile bool new_data = false;
+void NewDataReadyISR()
+{
+	new_data = true;
+}
+
 void setup()
 {
 	myGLCD.InitLCD();
@@ -87,6 +99,22 @@ void setup()
 	master.setTimeOut(2000); // if there is no answer in 2000 ms, roll over
 	u32wait = millis() + 1000;
 	u8state = 0;
+
+
+	ads.setGain(GAIN_SIXTEEN);
+	if (!ads.begin())
+	{
+		Serial.println("Failed to initialize ADS.");
+		while (1)
+			;
+	}
+
+	pinMode(READY_PIN, INPUT);
+	// We get a falling edge every time a new sample is ready.
+	attachInterrupt(digitalPinToInterrupt(READY_PIN), NewDataReadyISR, FALLING);
+
+	// Start continuous conversions.
+	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
 }
 
 void loop()
@@ -123,7 +151,8 @@ void loop()
 			u8state++; // wait state
 		break;
 	case 1:
-		if (is_new_modbus_message_ready) {
+		if (is_new_modbus_message_ready)
+		{
 			master.query(telegram);
 			is_new_modbus_message_ready = false;
 		}
@@ -138,6 +167,19 @@ void loop()
 			u32wait = millis() + 100;
 		}
 		break;
+	}
+
+	if (new_data)
+	{
+		int16_t results = ads.getLastConversionResults();
+
+		Serial.print("Differential: ");
+		Serial.print(results);
+		Serial.print("(");
+		Serial.print(ads.computeVolts(results));
+		Serial.println("mV)");
+
+		new_data = false;
 	}
 
 	// display_task();
@@ -207,10 +249,12 @@ void parse_message(const String &str)
 	{
 		send_wrong_data_to_pump();
 	}
-	else if (str.startsWith("set_rotate_direction")) {
+	else if (str.startsWith("set_rotate_direction"))
+	{
 		set_pump_rotate_direction(str);
 	}
-	else if (str.startsWith("get_rotate_direction")) {
+	else if (str.startsWith("get_rotate_direction"))
+	{
 		get_pump_rotate_direction();
 	}
 	else
@@ -223,11 +267,11 @@ void pump_start_handler()
 {
 	Serial.println("INFO: The pump is started!");
 
-	telegram.u8id = 1;			 			// slave address
-	telegram.u8fct = MB_FC_WRITE_REGISTER;	// function code (this one is registers read)
-	telegram.u16RegAdd = 1000;	 			// start address in slave
-	telegram.u16CoilsNo = 1;	 			// number of elements (coils or registers) to read
-	
+	telegram.u8id = 1;					   // slave address
+	telegram.u8fct = MB_FC_WRITE_REGISTER; // function code (this one is registers read)
+	telegram.u16RegAdd = 1000;			   // start address in slave
+	telegram.u16CoilsNo = 1;			   // number of elements (coils or registers) to read
+
 	au16data[0] = 1;
 
 	is_new_modbus_message_ready = true;
@@ -237,11 +281,11 @@ void pump_stop_handler()
 {
 	Serial.println("INFO: The pump is stopped!");
 
-	telegram.u8id = 1;			 			// slave address
-	telegram.u8fct = MB_FC_WRITE_REGISTER;	// function code (this one is registers read)
-	telegram.u16RegAdd = 1000;	 			// start address in slave
-	telegram.u16CoilsNo = 1;	 			// number of elements (coils or registers) to read
-	
+	telegram.u8id = 1;					   // slave address
+	telegram.u8fct = MB_FC_WRITE_REGISTER; // function code (this one is registers read)
+	telegram.u16RegAdd = 1000;			   // start address in slave
+	telegram.u16CoilsNo = 1;			   // number of elements (coils or registers) to read
+
 	au16data[0] = 0;
 
 	is_new_modbus_message_ready = true;
@@ -249,7 +293,7 @@ void pump_stop_handler()
 
 void set_pump_rotation_speed_handler(const String &str)
 {
-	char* strtok_index;
+	char *strtok_index;
 	char buff[64];
 
 	strtok_index = strtok(str.c_str(), " ");
@@ -269,16 +313,14 @@ void set_pump_rotation_speed_handler(const String &str)
 	pump_rmp = atof(float_str);
 	Serial.println(pump_rmp);
 
+	telegram.u8id = 1;								 // slave address
+	telegram.u8fct = MB_FC_WRITE_MULTIPLE_REGISTERS; // function code (this one is registers read)
+	telegram.u16RegAdd = 1002;						 // start address in slave
+	telegram.u16CoilsNo = 2;						 // number of elements (coils or registers) to read
 
-	telegram.u8id = 1;			 						// slave address
-	telegram.u8fct = MB_FC_WRITE_MULTIPLE_REGISTERS;	// function code (this one is registers read)
-	telegram.u16RegAdd = 1002;							// start address in slave
-	telegram.u16CoilsNo = 2;	 						// number of elements (coils or registers) to read
-
-	uint8_t* p_float = (void*)(&pump_rmp);
+	uint8_t *p_float = (void *)(&pump_rmp);
 	au16data[0] = p_float[2] | (p_float[3] << 8);
 	au16data[1] = p_float[0] | (p_float[1] << 8);
-
 
 	is_new_modbus_message_ready = true;
 }
@@ -288,8 +330,9 @@ void get_pump_rotation_speed_handler()
 	Serial.println(pump_rmp);
 }
 
-void set_pump_rotate_direction(const String& str) {
-	char* strtok_index;
+void set_pump_rotate_direction(const String &str)
+{
+	char *strtok_index;
 	char buff[64];
 
 	strtok_index = strtok(str.c_str(), " ");
@@ -300,17 +343,19 @@ void set_pump_rotate_direction(const String& str) {
 	strcpy(buff, strtok_index);
 	Serial.print(buff);
 
-	telegram.u8id = 1;			 			// slave address
-	telegram.u8fct = MB_FC_WRITE_REGISTER;	// function code (this one is registers read)
-	telegram.u16RegAdd = 1001;				// start address in slave
-	telegram.u16CoilsNo = 1;	 			// number of elements (coils or registers) to read	
-	
-	if (buff[0] == '0') {
+	telegram.u8id = 1;					   // slave address
+	telegram.u8fct = MB_FC_WRITE_REGISTER; // function code (this one is registers read)
+	telegram.u16RegAdd = 1001;			   // start address in slave
+	telegram.u16CoilsNo = 1;			   // number of elements (coils or registers) to read
+
+	if (buff[0] == '0')
+	{
 		Serial.println("Set the rotate direction to clockwise");
 		pump_rotate_direction = RotateDirections::CLOCKWISE;
 		au16data[0] = 1;
 	}
-	else {
+	else
+	{
 		Serial.println("Set the rotate direction to counterclockwise");
 		pump_rotate_direction = RotateDirections::COUNTERCLOCKWISE;
 		au16data[0] = 0;
@@ -319,7 +364,8 @@ void set_pump_rotate_direction(const String& str) {
 	is_new_modbus_message_ready = true;
 }
 
-void get_pump_rotate_direction() {
+void get_pump_rotate_direction()
+{
 	Serial.println("INFO: The rotate direction is ");
 	Serial.print((pump_rotate_direction == RotateDirections::CLOCKWISE) ? "clockwise" : "counterclockwise");
 }
