@@ -1,17 +1,10 @@
 #include <Arduino.h>
 #include <Arduino_FreeRTOS.h>
+#include <semphr.h>
 
 #include <Adafruit_ADS1X15.h>
 #include "UTFT.h"
 #include "ModbusRtu.h"
-
-#define dispMISO 8
-#define dispSCK 7
-#define dispCS 6
-#define dispRST 5
-#define dispDC 4
-
-/** TODO: Add start/stop state monitoring (add enum and variables) */
 
 // подключаем шрифты
 extern uint8_t SmallFont[];
@@ -20,23 +13,19 @@ extern uint8_t SevenSegNumFont[];
 
 String output_message = "Working...";
 
-void display_task();
-void CRCVerify(char *rec, char CRClen, char CRCdata[2]);
-
 void parse_message(const String &str);
 void pump_start_handler();
 void pump_stop_handler();
 void set_pump_rotation_speed_handler(const String &str);
-void get_pump_rotation_speed_handler();
 void set_pump_rotate_direction(const String &str);
-void get_pump_rotate_direction();
 
-void send_wrong_data_to_pump();
+enum PumpStates
+{
+	ON,
+	OFF
+};
 
-// объявляем объект myGLCD класса библиотеки UTFT указывая тип дисплея
-UTFT myGLCD(TFT01_24SP, dispMISO,
-			dispSCK, dispCS,
-			dispRST, dispDC);
+PumpStates pump_state = PumpStates::OFF;
 
 enum RotateDirections
 {
@@ -60,6 +49,8 @@ uint8_t u8state;
  */
 Modbus master(0, Serial3, 0); // this is master and RS-232 or USB-FTDI
 
+/** TODO: Add a separate modbus telegrams for start/stop, rotate
+ * direction and a motor speed */
 /**
  * This is an structe which contains a query to an slave device
  */
@@ -67,165 +58,36 @@ modbus_t telegram;
 
 bool is_new_modbus_message_ready = false;
 
-unsigned long u32wait;
+// Declare a mutex Semaphore Handle which we will use to manage the Serial Port.
+// It will be used to ensure only one Task is accessing this resource at any time.
+SemaphoreHandle_t xSerialSemaphore;
 
-Adafruit_ADS1115 ads;
-const uint16_t READY_PIN = 24;
-
-volatile bool new_data = false;
-void NewDataReadyISR()
-{
-	new_data = true;
-}
+void task_pressure_sensor_read(void *params);
+void task_draw_display(void *params);
+void task_pump_control(void *params);
+void task_CLI(void *params);
 
 void setup()
 {
-	myGLCD.InitLCD();
-	myGLCD.clrScr();
-	myGLCD.setFont(BigFont);
-	myGLCD.setColor(VGA_GRAY);
-
-	// PC <-> Arduino Mega communication
 	Serial.begin(115200);
 
-	telegram.u8id = 1;			 // slave address
-	telegram.u8fct = 6;			 // function code (this one is registers read)
-	telegram.u16RegAdd = 1000;	 // start address in slave
-	telegram.u16CoilsNo = 1;	 // number of elements (coils or registers) to read
-	telegram.au16reg = au16data; // pointer to a memory array in the Arduino
-
-	Serial3.begin(9600, SERIAL_8E1);
-	master.start();
-	master.setTimeOut(2000); // if there is no answer in 2000 ms, roll over
-	u32wait = millis() + 1000;
-	u8state = 0;
-
-
-	ads.setGain(GAIN_SIXTEEN);
-	if (!ads.begin())
+	// Semaphores are useful to stop a Task proceeding, where it should be paused to wait,
+	// because it is sharing a resource, such as the Serial port.
+	// Semaphores should only be used whilst the scheduler is running, but we can set it up here.
+	if (xSerialSemaphore == NULL) // Check to confirm that the Serial Semaphore has not already been created.
 	{
-		Serial.println("Failed to initialize ADS.");
-		while (1)
-			;
+		xSerialSemaphore = xSemaphoreCreateMutex(); // Create a mutex semaphore we will use to manage the Serial Port
+		if ((xSerialSemaphore) != NULL)
+			xSemaphoreGive((xSerialSemaphore)); // Make the Serial Port available for use, by "Giving" the Semaphore.
 	}
 
-	pinMode(READY_PIN, INPUT);
-	// We get a falling edge every time a new sample is ready.
-	attachInterrupt(digitalPinToInterrupt(READY_PIN), NewDataReadyISR, FALLING);
-
-	// Start continuous conversions.
-	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
+	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
+	xTaskCreate(task_draw_display, "DrawDisplay", 256, NULL, 2, NULL);
+	xTaskCreate(task_pump_control, "PumpControl", 256, NULL, 2, NULL);
+	xTaskCreate(task_CLI, "CLI", 256, NULL, 2, NULL);
 }
 
-void loop()
-{
-	// USB input data
-	if (Serial.available() >= 1)
-	{
-		uint8_t buff[512];
-		uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
-
-		String message;
-
-		for (uint16_t i = 0; i < size; ++i)
-		{
-			message.concat((char)buff[i]);
-		}
-
-		Serial.print("ECHO: ");
-		Serial.print(message);
-
-		parse_message(message);
-	}
-
-	// Pump reply
-	if (Serial3.available() >= 1)
-	{
-		Serial.print(Serial3.read());
-	}
-
-	switch (u8state)
-	{
-	case 0:
-		if (millis() > u32wait)
-			u8state++; // wait state
-		break;
-	case 1:
-		if (is_new_modbus_message_ready)
-		{
-			master.query(telegram);
-			is_new_modbus_message_ready = false;
-		}
-
-		u8state++;
-		break;
-	case 2:
-		master.poll(); // check incoming messages
-		if (master.getState() == COM_IDLE)
-		{
-			u8state = 0;
-			u32wait = millis() + 100;
-		}
-		break;
-	}
-
-	if (new_data)
-	{
-		int16_t results = ads.getLastConversionResults();
-
-		Serial.print("Differential: ");
-		Serial.print(results);
-		Serial.print("(");
-		Serial.print(ads.computeVolts(results));
-		Serial.println("mV)");
-
-		new_data = false;
-	}
-
-	// display_task();
-	delay(10);
-}
-
-// Code from MODBUS Communicatio Protocol description file
-void CRCVerify(char *rec, char CRClen, char CRCdata[2])
-{
-	char i1, j;
-	unsigned int crc_data = 0xffff;
-	for (i1 = 0; i1 < CRClen; i1++)
-	{
-		crc_data = crc_data ^ rec[i1];
-		for (j = 0; j < 8; j++)
-		{
-			if (crc_data & 0x0001)
-			{
-				crc_data >>= 1;
-				crc_data ^= 0xA001;
-			}
-			else
-			{
-				crc_data >>= 1;
-			}
-		}
-	}
-	CRCdata[0] = (char)(crc_data);
-	CRCdata[1] = (char)(crc_data >> 8);
-}
-
-void display_task()
-{
-	static bool is_text_visible = true;
-	if (is_text_visible)
-	{
-		myGLCD.print("ABEBA", 70, 50);
-		is_text_visible = false;
-	}
-	else
-	{
-		is_text_visible = true;
-		// myGLCD.clrScr();
-		myGLCD.print("ABOBA", 70, 50);
-	}
-}
+void loop() {}
 
 void parse_message(const String &str)
 {
@@ -241,21 +103,9 @@ void parse_message(const String &str)
 	{
 		set_pump_rotation_speed_handler(str);
 	}
-	else if (str.startsWith("get_speed"))
-	{
-		get_pump_rotation_speed_handler();
-	}
-	else if (str.startsWith("wrong"))
-	{
-		send_wrong_data_to_pump();
-	}
 	else if (str.startsWith("set_rotate_direction"))
 	{
 		set_pump_rotate_direction(str);
-	}
-	else if (str.startsWith("get_rotate_direction"))
-	{
-		get_pump_rotate_direction();
 	}
 	else
 	{
@@ -273,6 +123,7 @@ void pump_start_handler()
 	telegram.u16CoilsNo = 1;			   // number of elements (coils or registers) to read
 
 	au16data[0] = 1;
+	pump_state = PumpStates::ON;
 
 	is_new_modbus_message_ready = true;
 }
@@ -287,6 +138,7 @@ void pump_stop_handler()
 	telegram.u16CoilsNo = 1;			   // number of elements (coils or registers) to read
 
 	au16data[0] = 0;
+	pump_state = PumpStates::OFF;
 
 	is_new_modbus_message_ready = true;
 }
@@ -325,11 +177,6 @@ void set_pump_rotation_speed_handler(const String &str)
 	is_new_modbus_message_ready = true;
 }
 
-void get_pump_rotation_speed_handler()
-{
-	Serial.println(pump_rmp);
-}
-
 void set_pump_rotate_direction(const String &str)
 {
 	char *strtok_index;
@@ -364,15 +211,140 @@ void set_pump_rotate_direction(const String &str)
 	is_new_modbus_message_ready = true;
 }
 
-void get_pump_rotate_direction()
+void task_pressure_sensor_read(void *params)
 {
-	Serial.println("INFO: The rotate direction is ");
-	Serial.print((pump_rotate_direction == RotateDirections::CLOCKWISE) ? "clockwise" : "counterclockwise");
+	Adafruit_ADS1115 ads;
+
+	ads.setGain(GAIN_SIXTEEN);
+	if (!ads.begin())
+	{
+		Serial.println("Failed to initialize ADS.");
+		while (1)
+			;
+	}
+
+	// Start continuous conversions.
+	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
+
+	for (;;) // A Task shall never return or exit.
+	{
+		if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+		{
+			int16_t results = ads.getLastConversionResults();
+
+			Serial.print("Differential: ");
+			Serial.print(results);
+			Serial.print("(");
+			Serial.print(ads.computeVolts(results));
+			Serial.println("mV)");
+
+			xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+		}
+
+		vTaskDelay(60); // one tick delay (16ms) in between reads for stability
+	}
 }
 
-void send_wrong_data_to_pump()
+void task_draw_display(void *params)
 {
-	// Reply from pump - 1145313145
-	uint8_t wrong_sequence[8] = {0x01, 0xFF, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11};
-	Serial3.write(wrong_sequence, sizeof(wrong_sequence));
+	const uint16_t dispMISO = 8;
+	const uint16_t dispSCK = 7;
+	const uint16_t dispCS = 6;
+	const uint16_t dispRST = 5;
+	const uint16_t dispDC = 4;
+
+	// объявляем объект myGLCD класса библиотеки UTFT указывая тип дисплея
+	UTFT myGLCD(TFT01_24SP, dispMISO,
+				dispSCK, dispCS,
+				dispRST, dispDC);
+
+	myGLCD.InitLCD();
+	myGLCD.clrScr();
+	myGLCD.setFont(BigFont);
+	myGLCD.setColor(VGA_GRAY);
+
+	for (;;)
+	{
+		static bool is_text_visible = true;
+		if (is_text_visible)
+		{
+			myGLCD.print("ABEBA", 70, 50);
+			is_text_visible = false;
+		}
+		else
+		{
+			is_text_visible = true;
+			// myGLCD.clrScr();
+			myGLCD.print("ABOBA", 70, 50);
+		}
+
+		vTaskDelay(31);
+	}
+}
+
+void task_pump_control(void *params)
+{
+	telegram.u8id = 1;			 // slave address
+	telegram.u8fct = 6;			 // function code (this one is registers read)
+	telegram.u16RegAdd = 1000;	 // start address in slave
+	telegram.u16CoilsNo = 1;	 // number of elements (coils or registers) to read
+	telegram.au16reg = au16data; // pointer to a memory array in the Arduino
+
+	Serial3.begin(9600, SERIAL_8E1);
+	master.start();
+	master.setTimeOut(2000); // if there is no answer in 2000 ms, roll over
+	u8state = 0;
+
+	for (;;)
+	{
+		switch (u8state)
+		{
+		case 0:
+			if (is_new_modbus_message_ready)
+			{
+				master.query(telegram);
+				is_new_modbus_message_ready = false;
+			}
+			u8state++;
+			break;
+		case 1:
+			master.poll(); // check incoming messages
+			u8state = 0;
+			break;
+		}
+
+		vTaskDelay(7);
+	}
+}
+
+void task_CLI(void *params)
+{
+
+	for (;;)
+	{
+		// USB input data
+		if (Serial.available() >= 1)
+		{
+			if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+			{
+				uint8_t buff[128];
+				uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
+
+				String message;
+
+				for (uint16_t i = 0; i < size; ++i)
+				{
+					message.concat((char)buff[i]);
+				}
+
+				Serial.print("ECHO: ");
+				Serial.print(message);
+
+				parse_message(message);
+				xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+			}
+		}
+
+		vTaskDelay(1);
+	}
 }
