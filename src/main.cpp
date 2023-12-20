@@ -145,22 +145,37 @@ void task_pressure_sensor_read(void *params)
 	// Start continuous conversions.
 	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
 
+	int32_t results = 0;
+	uint8_t counter = 0;
+
 	for (;;) // A Task shall never return or exit.
 	{
-		// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
-		// {
-			// int16_t results = ads.getLastConversionResults();
+		if (counter > 9) {
+			if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+			{
+				int32_t converted_value = float(results) * 7.8125 / 25;
+				// Serial.print("Differential: ");
+				Serial.println(converted_value / counter);
+				// Serial.print("(");
+				// Serial.print(ads.computeVolts(results));
+				// Serial.println("mV)");
 
-			// Serial.print("Differential: ");
-			// Serial.print(results);
-			// Serial.print("(");
-			// Serial.print(ads.computeVolts(results));
-			// Serial.println("mV)");
+				xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+			}
 
-		// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
-		// }
+			results = 0;
+			counter = 0;
+		}
+		else {
+			results += ads.getLastConversionResults();
+			++counter;
+		}
 
-		vTaskDelay(60); // one tick delay (16ms) in between reads for stability
+		
+
+
+
+		vTaskDelay(6); // one tick delay (16ms) in between reads for stability
 	}
 }
 
@@ -179,31 +194,31 @@ void task_draw_display(void *params)
 	const uint16_t dispDC = 4;
 
 	// объявляем объект myGLCD класса библиотеки UTFT указывая тип дисплея
-	UTFT myGLCD(TFT01_24SP, dispMISO,
-				dispSCK, dispCS,
-				dispRST, dispDC);
+	// UTFT myGLCD(TFT01_24SP, dispMISO,
+	// 			dispSCK, dispCS,
+	// 			dispRST, dispDC);
 
-	myGLCD.InitLCD();
-	myGLCD.clrScr();
-	myGLCD.setFont(BigFont);
-	myGLCD.setColor(VGA_GRAY);
+	// myGLCD.InitLCD();
+	// myGLCD.clrScr();
+	// myGLCD.setFont(BigFont);
+	// myGLCD.setColor(VGA_GRAY);
 
 	Serial.println("LCD initialized!");
 
 	for (;;)
 	{
-		static bool is_text_visible = true;
-		if (is_text_visible)
-		{
-			myGLCD.print("абоба", 70, 50);
-			is_text_visible = false;
-		}
-		else
-		{
-			is_text_visible = true;
-			// myGLCD.clrScr();
-			myGLCD.print("абеба", 70, 50);
-		}
+		// static bool is_text_visible = true;
+		// if (is_text_visible)
+		// {
+		// 	myGLCD.print("abeba", 70, 50);
+		// 	is_text_visible = false;
+		// }
+		// else
+		// {
+		// 	is_text_visible = true;
+		// 	// myGLCD.clrScr();
+		// 	myGLCD.print("aboba", 70, 50);
+		// }
 
 		vTaskDelay(31);
 	}
@@ -214,7 +229,7 @@ void task_pump_control(void *params)
 	for (;;)
 	{
 		pump.process();
-		vTaskDelay(7);
+		vTaskDelay(1);
 	}
 }
 
@@ -226,8 +241,8 @@ void task_CLI(void *params)
 		// USB input data
 		if (Serial.available() >= 1)
 		{
-			// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
-			// {
+			if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+			{
 				uint8_t buff[128];
 				uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
 
@@ -242,17 +257,17 @@ void task_CLI(void *params)
 				Serial.print(message);
 
 				parse_message(message);
-			// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
-			// }
+				xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+			}
 		}
 
-		if (Serial3.available() >= 1) {
-			uint8_t buff[128];
-			uint16_t size = Serial3.available();
-			Serial3.readBytes(buff, size);
-			Serial.write(buff, size);
-		}
+		// if (Serial3.available() >= 1) {
+		// 	uint8_t buff[128];
+		// 	uint16_t size = Serial3.available();
+		// 	Serial3.readBytes(buff, size);
+		// 	Serial.write(buff, size);
+		// }
 
-		vTaskDelay(1);
+		vTaskDelay(5);
 	}
 }

@@ -44,8 +44,8 @@ private:
     /**
      * This is an structe which contains a query to an slave device
      */
-    // modbus_t telegram;
-    modbus_t state_tg;
-    modbus_t rotate_direction_tg;
-    modbus_t speed_tg;
+    modbus_t telegram;
+    // modbus_t state_tg;
+    // modbus_t rotate_direction_tg;
+    // modbus_t speed_tg;
 };
