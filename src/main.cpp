@@ -83,24 +83,31 @@ void pump_stop_handler()
 
 void set_pump_rotation_speed_handler(const String &str)
 {
-	char *strtok_index;
-	char buff[64];
+	int space_idx = str.indexOf(' ');
 
-	strtok_index = strtok(str.c_str(), " ");
-	strcpy(buff, strtok_index);
-	Serial.print(buff);
+	if (space_idx > str.length()) {
+		Serial.println("ERROR: Space index are more than string size!");
+		return;
+	}
+	
+	int LF_idx = str.indexOf('\n');
 
-	strtok_index = strtok(NULL, " ");
-	strcpy(buff, strtok_index);
-	Serial.print(buff);
+	if (LF_idx > str.length()) {
+		// Serial.println("ERROR: LF index are more than string size!");
+		LF_idx = str.length() - 1;
+		// return;
+	}
 
-	char float_str[10];
+	if (space_idx >= LF_idx) {
+		Serial.println("ERROR: space index more than LF index!");
+		return;
+	}
 
-	strtok_index = strtok(buff, "\n");
-	strcpy(float_str, strtok_index);
-	Serial.print(float_str);
+	String float_str = str.substring(space_idx + 1, LF_idx);
+	
+	float pump_rmp = float_str.toFloat();
 
-	float pump_rmp = atof(float_str);
+	Serial.print("DEBUG: Set speed value to ");
 	Serial.println(pump_rmp);
 
 	pump.set_speed(pump_rmp);
@@ -140,18 +147,18 @@ void task_pressure_sensor_read(void *params)
 
 	for (;;) // A Task shall never return or exit.
 	{
-		if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
-		{
-			int16_t results = ads.getLastConversionResults();
+		// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+		// {
+			// int16_t results = ads.getLastConversionResults();
 
-			Serial.print("Differential: ");
-			Serial.print(results);
-			Serial.print("(");
-			Serial.print(ads.computeVolts(results));
-			Serial.println("mV)");
+			// Serial.print("Differential: ");
+			// Serial.print(results);
+			// Serial.print("(");
+			// Serial.print(ads.computeVolts(results));
+			// Serial.println("mV)");
 
-			xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
-		}
+		// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+		// }
 
 		vTaskDelay(60); // one tick delay (16ms) in between reads for stability
 	}
@@ -188,7 +195,7 @@ void task_draw_display(void *params)
 		static bool is_text_visible = true;
 		if (is_text_visible)
 		{
-			myGLCD.print("АБОБА", 70, 50);
+			myGLCD.print("абоба", 70, 50);
 			is_text_visible = false;
 		}
 		else
@@ -219,8 +226,8 @@ void task_CLI(void *params)
 		// USB input data
 		if (Serial.available() >= 1)
 		{
-			if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
-			{
+			// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+			// {
 				uint8_t buff[128];
 				uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
 
@@ -235,8 +242,15 @@ void task_CLI(void *params)
 				Serial.print(message);
 
 				parse_message(message);
-				xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
-			}
+			// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+			// }
+		}
+
+		if (Serial3.available() >= 1) {
+			uint8_t buff[128];
+			uint16_t size = Serial3.available();
+			Serial3.readBytes(buff, size);
+			Serial.write(buff, size);
 		}
 
 		vTaskDelay(1);
