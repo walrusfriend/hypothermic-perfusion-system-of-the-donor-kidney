@@ -163,6 +163,7 @@ void task_draw_display(void *params)
 	extern uint8_t SmallFont[];
 	extern uint8_t BigFont[];
 	extern uint8_t SevenSegNumFont[];
+	extern uint8_t BigFontRus[];
 	
 	const uint16_t dispMISO = 8;
 	const uint16_t dispSCK = 7;
@@ -180,19 +181,21 @@ void task_draw_display(void *params)
 	myGLCD.setFont(BigFont);
 	myGLCD.setColor(VGA_GRAY);
 
+	Serial.println("LCD initialized!");
+
 	for (;;)
 	{
 		static bool is_text_visible = true;
 		if (is_text_visible)
 		{
-			myGLCD.print("ABEBA", 70, 50);
+			myGLCD.print("АБОБА", 70, 50);
 			is_text_visible = false;
 		}
 		else
 		{
 			is_text_visible = true;
 			// myGLCD.clrScr();
-			myGLCD.print("ABOBA", 70, 50);
+			myGLCD.print("абеба", 70, 50);
 		}
 
 		vTaskDelay(31);

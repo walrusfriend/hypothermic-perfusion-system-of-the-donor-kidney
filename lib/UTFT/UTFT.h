@@ -1,30 +1,40 @@
-/*
-  UTFT.cpp - Мульти-платформенная библиотека поддерживабщая цветные TFT LCD-панели
-  Copyright (C)2015 Авторское Право: Rinky-Dink Electronics, Henning Karlsen. Все права защищены
+﻿/*
+  UTFT.h - Multi-Platform library support for Color TFT LCD Boards
+  Copyright (C)2015 Rinky-Dink Electronics, Henning Karlsen. All right reserved
+  
+  This library is the continuation of my ITDB02_Graph, ITDB02_Graph16
+  and RGB_GLCD libraries for Arduino and chipKit. As the number of 
+  supported display modules and controllers started to increase I felt 
+  it was time to make a single, universal library as it will be much 
+  easier to maintain in the future.
 
-  Эта библиотека является продолжением моих библиотек ITDB02_Graph, ITDB02_Graph16 и RGB_GLCD для Arduino и chipKit.
-  Так как количество поддерживаемых модулей и контроллеров начало расти, я решил, что пришло время создать одну универсальную библиотеку.
+  Basic functionality of this library was origianlly based on the 
+  demo-code provided by ITead studio (for the ITDB02 modules) and 
+  NKC Electronics (for the RGB GLCD module/shield).
 
-  Основные функции этой библиотеки были созданы на основе демо-кода,
-  предоставленного ITead Studio (для модулей ITDB02) и NKC Electronics (для RGB GLCD модулей/шилдов).
+  This library supports a number of 8bit, 16bit and serial graphic 
+  displays, and will work with both Arduino, chipKit boards and select 
+  TI LaunchPads. For a full list of tested display modules and controllers,
+  see the document UTFT_Supported_display_modules_&_controllers.pdf.
 
-  Эта библиотека поддерживает 8 битные, 16 битные и последовательные интерфейсы графических дисплеев,
-  и будет работать с платами Ардуино, chipKit и select TI LaunchPads.
-  Полный список протестированных модулей и контроллеров укзан в файле UTFT_Supported_display_modules_&_controllers.pdf.
+  When using 8bit and 16bit display modules there are some 
+  requirements you must adhere to. These requirements can be found 
+  in the document UTFT_Requirements.pdf.
+  There are no special requirements when using serial displays.
 
-  При использовании 8 битных и 16 битных модулей, существуют некоторые требования, которые вы должны соблюдать.
-  Эти требования можно найти в UTFT_Requirements.pdf.
-  При использовании модулей с последовательным интерфейсом, нет никаких специальных требований.
+  You can find the latest version of the library at 
+  http://www.RinkyDinkElectronics.com/
 
-  Вы можете найти свежую версию библиотеки перейдя по ссылке: http://www.RinkyDinkElectronics.com/
+  This library is free software; you can redistribute it and/or
+  modify it under the terms of the CC BY-NC-SA 3.0 license.
+  Please see the included documents for further information.
 
-  Эта библиотека является свободным программным обеспечением;
-  Вы можете распространять и/или изменять её в соответствии с пунктом 3.0 лицензии CC BY-NC-SA.
+  Commercial use of this library requires you to buy a license that
+  will allow commercial use. This includes using the library,
+  modified or not, as a tool to sell products.
 
-  Коммерческое использование этой библиотеки предусматривает приобретение лицензии.
-  Включая использование библиотеки, модифицированной или нет, как инструмент для продажи продуктов.
-
-  Лицензия распространяется на все библиотеки, в том числе примеры и инструменты, поставляемые с библиотекой.
+  The license applies to all part of the library including the 
+  examples and tools supplied with the library.
 */
 
 #ifndef UTFT_h
@@ -36,8 +46,8 @@
 #define RIGHT 9999
 #define CENTER 9998
 
-#define PORTRAIT 0
-#define LANDSCAPE 1
+#define PORTRAIT 0      //Горизонтально
+#define LANDSCAPE 1     //Вертикально
 
 #define HX8347A			0
 #define ILI9327			1
@@ -71,10 +81,6 @@
 #define CPLD			29
 #define HX8353C			30
 #define ST7735_ALT		31
-#define ILI9341_UNO		32
-#define ILI9341_MEGA	33
-#define ILI9327_UNO		34
-#define HX8357C		    35
 
 #define ITDB32			0	// HX8347-A (16bit)
 #define ITDB32WC		1	// ILI9327  (16bit)
@@ -116,7 +122,6 @@
 #define CTE70			20	// SSD1963	(16bit) 800x480 Alternative Init
 #define EHOUSE70		20	// SSD1963	(16bit) 800x480 Alternative Init
 #define CTE32HR			21	// ILI9481	(16bit)
-#define TFT32MEGA		21	// ILI9481	(16bit)
 #define CTE28			22	// ILI9325D (16bit) Alternative Init
 #define TFT01_28		22	// ILI9325D (16bit) Alternative Init
 #define CTE22			23	// S6D0164	(8bit)
@@ -135,14 +140,11 @@
 #define CTE70CPLD		29	// CPLD		(16bit)
 #define DMTFT18101      30  // HX8353C  (Serial 5Pin)
 #define TFT18SHLD		31	// ST7735	(Serial 5Pin) Alternative Init
-#define TFT28UNO		32	// ILI9341	(8bit)
-#define TFT28MEGA		33	// ILI9341	(8bit)
-#define TFT395UNO		34	// ILI9327	(8bit)
-#define TFT32MEGA_2		35	// HX8357C	(16bit)
 
 #define SERIAL_4PIN		4
 #define SERIAL_5PIN		5
 #define LATCHED_16		17
+
 #define NOTINUSE		255
 
 //*********************************
@@ -185,7 +187,7 @@ struct _current_font
 	uint8_t y_size;
 	uint8_t offset;
 	uint8_t numchars;
-};
+};                                         
 
 class UTFT
 {
@@ -206,12 +208,18 @@ class UTFT
 		void	fillCircle(int x, int y, int radius);
 		void	setColor(byte r, byte g, byte b);
 		void	setColor(word color);
+        void	setGradientColor(word startcolor, word endcolor, int gradientmode);
 		word	getColor();
 		void	setBackColor(byte r, byte g, byte b);
 		void	setBackColor(uint32_t color);
 		word	getBackColor();
 		void	print(char *st, int x, int y, int deg=0);
 		void	print(String st, int x, int y, int deg=0);
+        
+        void	textRus(char *st, int x, int y);
+		void	textRus(String st, int x, int y);
+        void    textRus(char ch[], int length, int x, int y);
+        
 		void	printNumI(long num, int x, int y, int length=0, char filler=' ');
 		void	printNumF(double num, byte dec, int x, int y, char divider='.', int length=0, char filler=' ');
 		void	setFont(uint8_t* font);
@@ -228,7 +236,6 @@ class UTFT
 		void	setBrightness(byte br);
 		void	setDisplayPage(byte page);
 		void	setWritePage(byte page);
-
 /*
 	The functions and variables below should not normally be used.
 	They have been left publicly available for use in add-on libraries
@@ -237,7 +244,11 @@ class UTFT
 	Please note that these functions and variables are not documented
 	and I do not provide support on how to use them.
 */
-		byte			fch, fcl, bch, bcl;
+		int             byte_code=0;
+        int             stl_count=0;
+        String          StateWhile = "None";
+        uint8_t         i;
+        byte			fch, fcl, bch, bcl;
 		byte			orient;
 		long			disp_x_size, disp_y_size;
 		byte			display_model, display_transfer_mode, display_serial_mode;
@@ -246,7 +257,6 @@ class UTFT
 		byte			__p1, __p2, __p3, __p4, __p5;
 		_current_font	cfont;
 		boolean			_transparent;
-		boolean			LCD_Write_1byte_Flag = 0;
 
 		void LCD_Writ_Bus(char VH,char VL, byte mode);
 		void LCD_Write_COM(char VL);
@@ -258,6 +268,7 @@ class UTFT
 		void drawHLine(int x, int y, int l);
 		void drawVLine(int x, int y, int l);
 		void printChar(byte c, int x, int y);
+        void tftChar(byte c, int x, int y);
 		void setXY(word x1, word y1, word x2, word y2);
 		void clrXY();
 		void rotateChar(byte c, int x, int y, int pos, int deg);

@@ -1,35 +1,45 @@
-/*
-  UTFT.cpp - Мульти-платформенная библиотека поддерживабщая цветные TFT LCD-панели
-  Copyright (C)2015 Авторское Право: Rinky-Dink Electronics, Henning Karlsen. Все права защищены
+﻿/*
+  UTFT.cpp - Multi-Platform library support for Color TFT LCD Boards
+  Copyright (C)2015 Rinky-Dink Electronics, Henning Karlsen. All right reserved
+  
+  This library is the continuation of my ITDB02_Graph, ITDB02_Graph16
+  and RGB_GLCD libraries for Arduino and chipKit. As the number of 
+  supported display modules and controllers started to increase I felt 
+  it was time to make a single, universal library as it will be much 
+  easier to maintain in the future.
 
-  Эта библиотека является продолжением моих библиотек ITDB02_Graph, ITDB02_Graph16 и RGB_GLCD для Arduino и chipKit.
-  Так как количество поддерживаемых модулей и контроллеров начало расти, я решил, что пришло время создать одну универсальную библиотеку.
+  Basic functionality of this library was origianlly based on the 
+  demo-code provided by ITead studio (for the ITDB02 modules) and 
+  NKC Electronics (for the RGB GLCD module/shield).
 
-  Основные функции этой библиотеки были созданы на основе демо-кода,
-  предоставленного ITead Studio (для модулей ITDB02) и NKC Electronics (для RGB GLCD модулей/шилдов).
+  This library supports a number of 8bit, 16bit and serial graphic 
+  displays, and will work with both Arduino, chipKit boards and select 
+  TI LaunchPads. For a full list of tested display modules and controllers,
+  see the document UTFT_Supported_display_modules_&_controllers.pdf.
 
-  Эта библиотека поддерживает 8 битные, 16 битные и последовательные интерфейсы графических дисплеев,
-  и будет работать с платами Ардуино, chipKit и select TI LaunchPads.
-  Полный список протестированных модулей и контроллеров укзан в файле UTFT_Supported_display_modules_&_controllers.pdf.
+  When using 8bit and 16bit display modules there are some 
+  requirements you must adhere to. These requirements can be found 
+  in the document UTFT_Requirements.pdf.
+  There are no special requirements when using serial displays.
 
-  При использовании 8 битных и 16 битных модулей, существуют некоторые требования, которые вы должны соблюдать.
-  Эти требования можно найти в UTFT_Requirements.pdf.
-  При использовании модулей с последовательным интерфейсом, нет никаких специальных требований.
+  You can find the latest version of the library at 
+  http://www.RinkyDinkElectronics.com/
 
-  Вы можете найти свежую версию библиотеки перейдя по ссылке: http://www.RinkyDinkElectronics.com/
+  This library is free software; you can redistribute it and/or
+  modify it under the terms of the CC BY-NC-SA 3.0 license.
+  Please see the included documents for further information.
 
-  Эта библиотека является свободным программным обеспечением;
-  Вы можете распространять и/или изменять её в соответствии с пунктом 3.0 лицензии CC BY-NC-SA.
+  Commercial use of this library requires you to buy a license that
+  will allow commercial use. This includes using the library,
+  modified or not, as a tool to sell products.
 
-  Коммерческое использование этой библиотеки предусматривает приобретение лицензии.
-  Включая использование библиотеки, модифицированной или нет, как инструмент для продажи продуктов.
-
-  Лицензия распространяется на все библиотеки, в том числе примеры и инструменты, поставляемые с библиотекой.
+  The license applies to all part of the library including the 
+  examples and tools supplied with the library.
 */
 
 #include "UTFT.h"
 
-// Подключение аппаратно-зависимых функций, для правильной работы микроконтроллеров
+// Include hardware-specific functions for the correct MCU
 #if defined(__AVR__)
 	#include <avr/pgmspace.h>
 	#include "hardware/avr/HW_AVR.h"
@@ -71,24 +81,54 @@
 	#elif defined(__CC3200R1M1RGC__)
 		#pragma message("Compiling for TI CC3200 LaunchPad...")
 		#include "hardware/arm/HW_CC3200.h"
-	#else
+	#else                   
 		#error "Unsupported ARM MCU!"
 	#endif
 #endif
 #include "memorysaver.h"
 
-UTFT::UTFT(){}
-UTFT::UTFT(byte model, int RS, int WR, int CS, int RST, int SER){
-//	обозначение:					--			--			CTE32		--			DMTFT24104	--			--			--			CTE32W		--			LPH9135		--			--			CTE50		--			--			ELEE32_REVA	--			--			ELEE32_REVB	CTE70		CTE32HR		CTE28		CTE22		--			DMTFT28105	MI0283QT9	CTE35IPS	CTE40		CTE50CPLD	DMTFT18101	--			--			--			--			--
-//									--			--			--			--			DMTFT28103	--			--			--			--			--			--			--			--			EHOUSE50	--			--			INFINIT32	--			--			--			EHOUSE70	--			--			DMTFT22102	--			--			--			--			--			CTE70CPLD	--			--			--			--			--			--
-//									ITDB32		ITDB32WC	ITDB32S		ITDB24		ITDB28		--			ITDB22		ITDB22SP	ITDB32WD	ITDB18SP	--			ITDB25H		ITDB43		ITDB50		ITDB24E_8	--			--			--			--			--			--			--			--			--			--			--			--			--			--			EHOUSE50CPLD--			--			--			--			--			--
-//									--			--			--			--			ITDB24D		--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			TFT22SHLD	--			--			--			--			--			--			--			--			--			--
-//									--			--			--			--			ITDB24DWOT	--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			--			TFT01_22SP	--			--			--			--			--			--			--			--			--			--
-//									--			TFT01_32W	TFT01_32	--			TFT01_24_8  TFT01_24_16	--			--			TFT01_32WD	--			--			--			TFT01_43	TFT01_50	TFT01_24R2	ITDB24E_16	--			--			--			--			TFT01_70	TFT32MEGA	TFT01_28	TFT01_22	TFT01_18SP	TFT01_24SP	--			--			--			--			--			TFT18SHLD	TFT28UNO	TFT28MEGA	TFT395UNO	TFT32MEGA_2
-//	контроллер:						HX8347-A	ILI9327		SSD1289		ILI9325C	ILI9325D	ILI9325D	HX8340-B	HX8340-B	HX8352-A	ST7735		PCF8833		S1D19122	SSD1963		SSD1963		S6D1121		S6D1121		SSD1289		--			--			SSD1289		SSD1963		ILI9481		ILI9325D	S6D0164		ST7735S		ILI9341		ILI9341		R61581		ILI9486		CPLD		HX8353C		ST7735		ILI9341		ILI9341		ILI9327		HX8357C
-/*	размер x:	 */	word dsx[] = {	239,		239,		239,		239,		239,		239,		175,		175,		239,        127,		127,		239,		271,		479,		239,		239,		239,		0,			0,			239,		479,		319,		239,		175,		127,		239,		239,		319,		319,		799,		127,		127,		239,		239,		319,		319			};
-/*	размер y:	 */	word dsy[] = {	319,		399,		319,		319,		319,		319,		219,		219,		399,        159,		127,		319,		479,		799,		319,		319,		319,		0,			0,			319,		799,		479,		319,		219,		159,		319,		319,		479,		479,		479,		159,		159,		319,		319,		479,		479			};
-/*	размер шины: */	byte dtm[] = {	16,			16,			16,			8,			8,			16,			8,			SERIAL_4PIN,16,			SERIAL_5PIN,SERIAL_5PIN,16,			16,			16,			8,			16,			LATCHED_16,	0,			0,			8,			16,			16,			16,			8,			SERIAL_5PIN,SERIAL_5PIN,SERIAL_4PIN,16,			16,			16,			SERIAL_5PIN,SERIAL_5PIN,8,			8,			8,			16			};
+//   
+extern uint8_t character_rus[104] = 
+{
+    ' ', '!', '"', '#', '$', '%', '&', '`', '(', ')',
+	'*', '+', ',', '-', '.', '/', '0', '1', '2', '3',
+	'4', '5', '6', '7', '8', '9', ':', ';', '<', '=',
+	'>', '?', 'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж', 'З',
+	'И', 'Й', 'К', 'Л', 'М', 'Н', 'О', 'П', 'Р', 'С',
+	'Т', 'У', 'Ф', 'Х', 'Ц', 'Ч', 'Ш', 'Щ', 'Ъ', 'Ы',
+	'Ь', 'Э', 'Ю', 'Я', 'а', 'б', 'в', 'г', 'д', 'е',
+	'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п',
+	'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ',
+	'ъ', 'ы', 'ь', 'э', 'ю', 'я', '{', '|', '}', '~',
+	'[', ']', '^', '_'
+};
+
+extern uint8_t code_byte_lcd[104] = 
+{
+     32,  33,  34,  35,  36,  37,  38,  39,  40,  41,
+	 42,  43,  44,  45,  46,  47,  48,  49,  50,  51,
+	 52,  53,  54,  55,  56,  57,  58,  59,  60,  61,
+	 62,  63,  64,  65,  66,  67,  68,  69,  70,  71,
+	 72,  73,  74,  75,  76,  77,  78,  79,  80,  81,
+	 82,  83,  84,  85,  86,  87,  88,  89,  90,  91,
+	 92,  93,  94,  95,  96,  97,  98,  99, 100, 101,
+	102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+	112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+	122, 123, 124, 125, 126, 127, 128, 129, 130, 131,
+	132, 133, 134, 135
+};
+
+//char dht[]   = {'В','л','а','ж','н','о','с','т','ь',',','%'};
+
+UTFT::UTFT()
+{
+}
+
+UTFT::UTFT(byte model, int RS, int WR, int CS, int RST, int SER)
+{ 
+	word	dsx[] = {239, 239, 239, 239, 239, 239, 175, 175, 239, 127, 127, 239, 271, 479, 239, 239, 239, 0, 0, 239, 479, 319, 239, 175, 127, 239, 239, 319, 319, 799, 127, 127};
+	word	dsy[] = {319, 399, 319, 319, 319, 319, 219, 219, 399, 159, 127, 319, 479, 799, 319, 319, 319, 0, 0, 319, 799, 479, 319, 219, 159, 319, 319, 479, 479, 479, 159, 159};
+	byte	dtm[] = {16, 16, 16, 8, 8, 16, 8, SERIAL_4PIN, 16, SERIAL_5PIN, SERIAL_5PIN, 16, 16, 16, 8, 16, LATCHED_16, 0, 0, 8, 16, 16, 16, 8, SERIAL_5PIN, SERIAL_5PIN, SERIAL_4PIN, 16, 16, 16, SERIAL_5PIN, SERIAL_5PIN};
 
 	disp_x_size =			dsx[model];
 	disp_y_size =			dsy[model];
@@ -131,11 +171,6 @@ UTFT::UTFT(byte model, int RS, int WR, int CS, int RST, int SER){
 			pinMode(8,OUTPUT);
 			digitalWrite(8, LOW);
 		}
-		if (display_model==ILI9341_UNO || display_model==ILI9341_MEGA || ILI9327_UNO){
-			P_ALE	= portOutputRegister(digitalPinToPort(SER));
-			B_ALE	= digitalPinToBitMask(SER);
-			sbi(P_ALE, B_ALE);
-		}
 	}
 	else
 	{
@@ -163,9 +198,7 @@ void UTFT::LCD_Write_COM(char VL)
 	if (display_transfer_mode!=1)
 	{
 		cbi(P_RS, B_RS);
-		LCD_Write_1byte_Flag = 1;
 		LCD_Writ_Bus(0x00,VL,display_transfer_mode);
-		LCD_Write_1byte_Flag = 0;
 	}
 	else
 		LCD_Writ_Bus(0x00,VL,display_transfer_mode);
@@ -190,9 +223,7 @@ void UTFT::LCD_Write_DATA(char VL)
 	if (display_transfer_mode!=1)
 	{
 		sbi(P_RS, B_RS);
-		LCD_Write_1byte_Flag = 1;
 		LCD_Writ_Bus(0x00,VL,display_transfer_mode);
-		LCD_Write_1byte_Flag = 0;
 	}
 	else
 		LCD_Writ_Bus(0x01,VL,display_transfer_mode);
@@ -214,7 +245,7 @@ void UTFT::InitLCD(byte orientation)
 	pinMode(__p3,OUTPUT);
 	if (__p4 != NOTINUSE)
 		pinMode(__p4,OUTPUT);
-	if ((display_transfer_mode==LATCHED_16) or (display_model==ILI9341_UNO) or (display_model==ILI9341_MEGA) or (display_model==ILI9327_UNO) or ((display_transfer_mode==1) and (display_serial_mode==SERIAL_5PIN)))
+	if ((display_transfer_mode==LATCHED_16) or ((display_transfer_mode==1) and (display_serial_mode==SERIAL_5PIN)))
 		pinMode(__p5,OUTPUT);
 	if (display_transfer_mode!=1)
 		_set_direction_registers(display_transfer_mode);
@@ -235,9 +266,6 @@ void UTFT::InitLCD(byte orientation)
 #endif
 #ifndef DISABLE_ILI9327
 	#include "tft_drivers/ili9327/initlcd.h"
-#endif
-#ifndef DISABLE_ILI9327_UNO
-	#include "tft_drivers/ili9327/uno/initlcd.h"
 #endif
 #ifndef DISABLE_SSD1289
 	#include "tft_drivers/ssd1289/initlcd.h"
@@ -299,12 +327,6 @@ void UTFT::InitLCD(byte orientation)
 #ifndef DISABLE_ILI9341_S5P
 	#include "tft_drivers/ili9341/s5p/initlcd.h"
 #endif
-#ifndef DISABLE_ILI9341_UNO
-	#include "tft_drivers/ili9341/uno/initlcd.h"
-#endif
-#ifndef DISABLE_ILI9341_MEGA
-	#include "tft_drivers/ili9341/mega/initlcd.h"
-#endif
 #ifndef DISABLE_R61581
 	#include "tft_drivers/r61581/initlcd.h"
 #endif
@@ -317,10 +339,8 @@ void UTFT::InitLCD(byte orientation)
 #ifndef DISABLE_HX8353C
 	#include "tft_drivers/hx8353c/initlcd.h"
 #endif
-#ifndef DISABLE_HX8357C
-	#include "tft_drivers/hx8357c/initlcd.h"
-#endif
 	}
+
 	sbi (P_CS, B_CS); 
 
 	setColor(255, 255, 255);
@@ -350,9 +370,6 @@ void UTFT::setXY(word x1, word y1, word x2, word y2)
 #endif
 #ifndef DISABLE_ILI9327
 	#include "tft_drivers/ili9327/setxy.h"
-#endif
-#ifndef DISABLE_ILI9327_UNO
-	#include "tft_drivers/ili9327/uno/setxy.h"
 #endif
 #ifndef DISABLE_SSD1289
 	#include "tft_drivers/ssd1289/setxy.h"
@@ -411,12 +428,6 @@ void UTFT::setXY(word x1, word y1, word x2, word y2)
 #ifndef DISABLE_ILI9341_S5P
 	#include "tft_drivers/ili9341/s5p/setxy.h"
 #endif
-#ifndef DISABLE_ILI9341_UNO
-	#include "tft_drivers/ili9341/uno/setxy.h"
-#endif
-#ifndef DISABLE_ILI9341_MEGA
-	#include "tft_drivers/ili9341/mega/setxy.h"
-#endif
 #ifndef DISABLE_R61581
 	#include "tft_drivers/r61581/setxy.h"
 #endif
@@ -428,9 +439,6 @@ void UTFT::setXY(word x1, word y1, word x2, word y2)
 #endif
 #ifndef DISABLE_HX8353C
 	#include "tft_drivers/hx8353c/setxy.h"
-#endif
-#ifndef DISABLE_HX8357C
-	#include "tft_drivers/hx8357c/setxy.h"
 #endif
 	}
 }
@@ -476,10 +484,10 @@ void UTFT::drawRoundRect(int x1, int y1, int x2, int y2)
 		drawPixel(x2-1,y1+1);
 		drawPixel(x1+1,y2-1);
 		drawPixel(x2-1,y2-1);
-		drawHLine(x1+2, y1, x2-x1-4);
-		drawHLine(x1+2, y2, x2-x1-4);
-		drawVLine(x1, y1+2, y2-y1-4);
-		drawVLine(x2, y1+2, y2-y1-4);
+		drawHLine(x1+2, y1,   x2-x1-4);
+		drawHLine(x1+2, y2,   x2-x1-4);
+		drawVLine(x1,   y1+2, y2-y1-4);
+		drawVLine(x2,   y1+2, y2-y1-4);
 	}
 }
 
@@ -703,6 +711,11 @@ void UTFT::setColor(word color)
 	fcl=byte(color & 0xFF);
 }
 
+void UTFT::setGradientColor(word startcolor, word endcolor, int gradientmode)
+{
+
+}
+
 word UTFT::getColor()
 {
 	return (fch<<8) | fcl;
@@ -877,6 +890,7 @@ void UTFT::printChar(byte c, int x, int y)
 			setXY(x,y,x+cfont.x_size-1,y+cfont.y_size-1);
 	  
 			temp=((c-cfont.offset)*((cfont.x_size/8)*cfont.y_size))+4;
+            
 			for(j=0;j<((cfont.x_size/8)*cfont.y_size);j++)
 			{
 				ch=pgm_read_byte(&cfont.font[temp]);
@@ -900,10 +914,12 @@ void UTFT::printChar(byte c, int x, int y)
 
 			for(j=0;j<((cfont.x_size/8)*cfont.y_size);j+=(cfont.x_size/8))
 			{
-				setXY(x,y+(j/(cfont.x_size/8)),x+cfont.x_size-1,y+(j/(cfont.x_size/8)));
+				setXY(x,y+(j/(cfont.x_size/8)),x+cfont.x_size-1,y+(j/(cfont.x_size/8))); 
+                
 				for (int zz=(cfont.x_size/8)-1; zz>=0; zz--)
 				{
 					ch=pgm_read_byte(&cfont.font[temp+zz]);
+                    
 					for(i=0;i<8;i++)
 					{   
 						if((ch&(1<<i))!=0)   
@@ -923,11 +939,13 @@ void UTFT::printChar(byte c, int x, int y)
 	else
 	{
 		temp=((c-cfont.offset)*((cfont.x_size/8)*cfont.y_size))+4;
+        
 		for(j=0;j<cfont.y_size;j++) 
 		{
 			for (int zz=0; zz<(cfont.x_size/8); zz++)
 			{
-				ch=pgm_read_byte(&cfont.font[temp+zz]); 
+				ch=pgm_read_byte(&cfont.font[temp+zz]);
+                 
 				for(i=0;i<8;i++)
 				{   
 				
@@ -994,17 +1012,17 @@ void UTFT::print(char *st, int x, int y, int deg)
 
 	if (orient==PORTRAIT)
 	{
-	if (x==RIGHT)
-		x=(disp_x_size+1)-(stl*cfont.x_size);
-	if (x==CENTER)
-		x=((disp_x_size+1)-(stl*cfont.x_size))/2;
+	  if (x==RIGHT)
+		    x=(disp_x_size+1)-(stl*cfont.x_size);
+	  if (x==CENTER)
+		    x=((disp_x_size+1)-(stl*cfont.x_size))/2;
 	}
 	else
 	{
-	if (x==RIGHT)
-		x=(disp_y_size+1)-(stl*cfont.x_size);
-	if (x==CENTER)
-		x=((disp_y_size+1)-(stl*cfont.x_size))/2;
+	  if (x==RIGHT)
+		    x=(disp_y_size+1)-(stl*cfont.x_size);
+	  if (x==CENTER)
+		    x=((disp_y_size+1)-(stl*cfont.x_size))/2;
 	}
 
 	for (i=0; i<stl; i++)
@@ -1021,6 +1039,51 @@ void UTFT::print(String st, int x, int y, int deg)
 	st.toCharArray(buf, st.length()+1);
 	print(buf, x, y, deg);
 }
+
+///////////////////////////////////////////////////////////////////////////
+//                            ВЫВОД КИРИЛИЦЫ                             //
+///////////////////////////////////////////////////////////////////////////
+
+void UTFT::tftChar(byte c, int x, int y)
+{
+    uint8_t s=0;
+    
+    while((character_rus[s]!= c) & (s!=sizeof(code_byte_lcd))) { s++; }
+    if(s!=sizeof(code_byte_lcd)) {
+        printChar(code_byte_lcd[s], x + ((i)*(cfont.x_size)), y);
+        i++;
+    }
+}
+
+void UTFT::textRus(char *st, int x, int y) //char *str = "Мощность";
+{
+    while(*st)
+    {
+       tftChar(*st, x, y);
+       *st++;
+    }
+    i=0;
+}
+
+void UTFT::textRus(String st, int x, int y)  //st => "Привет мир!"
+{
+    char buf[st.length()];
+
+	st.toCharArray(buf, st.length());
+	textRus(buf, x, y);
+    i=0;
+}
+
+void UTFT::textRus(char ch[], int length, int x, int y) //char temperatura[]={'Т','о','к',',','А'};
+{   
+    for(int j=0; j<length; j++)
+    {
+        tftChar(ch[j], x, y);
+    }
+    i=0; 
+}
+//////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
 
 void UTFT::printNumI(long num, int x, int y, int length, char filler)
 {
@@ -1129,7 +1192,7 @@ void UTFT::printNumF(double num, byte dec, int x, int y, char divider, int lengt
 
 void UTFT::setFont(uint8_t* font)
 {
-	cfont.font=font;
+	cfont.font=font;   //BigFont
 	cfont.x_size=fontbyte(0);
 	cfont.y_size=fontbyte(1);
 	cfont.offset=fontbyte(2);
