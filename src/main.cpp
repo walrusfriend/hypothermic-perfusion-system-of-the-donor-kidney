@@ -6,13 +6,24 @@
 
 #include "Pump.h"
 
+#include "GyverPID.h"
+
 void parse_message(const String &str);
 void pump_start_handler();
 void pump_stop_handler();
 void set_pump_rotation_speed_handler(const String &str);
 void set_pump_rotate_direction(const String &str);
+void set_P(const String &str);
+void set_I(const String &str);
+void set_D(const String &str);
+
+void PIDor(const float &value);
+
+GyverPID pid(1, 1, 1, 960);
 
 Pump pump;
+
+bool is_data_transmitted = false;
 
 // Declare a mutex Semaphore Handle which we will use to manage the Serial Port.
 // It will be used to ensure only one Task is accessing this resource at any time.
@@ -63,6 +74,15 @@ void parse_message(const String &str)
 	{
 		set_pump_rotate_direction(str);
 	}
+	else if (str.startsWith("set_P")) {
+		set_P(str);
+	}
+	else if (str.startsWith("set_I")) {
+		set_I(str);
+	}
+	else if (str.startsWith("set_D")) {
+		set_D(str);
+	}
 	else
 	{
 		Serial.println("ERROR: Unknown command!");
@@ -85,26 +105,29 @@ void set_pump_rotation_speed_handler(const String &str)
 {
 	int space_idx = str.indexOf(' ');
 
-	if (space_idx > str.length()) {
+	if (space_idx > str.length())
+	{
 		Serial.println("ERROR: Space index are more than string size!");
 		return;
 	}
-	
+
 	int LF_idx = str.indexOf('\n');
 
-	if (LF_idx > str.length()) {
+	if (LF_idx > str.length())
+	{
 		// Serial.println("ERROR: LF index are more than string size!");
 		LF_idx = str.length() - 1;
 		// return;
 	}
 
-	if (space_idx >= LF_idx) {
+	if (space_idx >= LF_idx)
+	{
 		Serial.println("ERROR: space index more than LF index!");
 		return;
 	}
 
 	String float_str = str.substring(space_idx + 1, LF_idx);
-	
+
 	float pump_rmp = float_str.toFloat();
 
 	Serial.print("DEBUG: Set speed value to ");
@@ -130,6 +153,43 @@ void set_pump_rotate_direction(const String &str)
 	pump.set_rotate_direction((buff[0] == '0') ? RotateDirections::COUNTERCLOCKWISE : RotateDirections::CLOCKWISE);
 }
 
+void set_P(const String &str) {
+	int space_idx = str.indexOf(' ');
+
+	String P = str.substring(space_idx + 1, str.length() - 1);
+	pid.Kp = P.toFloat();
+
+	Serial.print("Set kP value to ");
+	Serial.println(pid.Kp);
+}
+
+void set_I(const String &str) {
+	int space_idx = str.indexOf(' ');
+
+	String I = str.substring(space_idx + 1, str.length() - 1);
+	pid.Ki = I.toFloat();
+
+	Serial.print("Set ki value to ");
+	Serial.println(pid.Ki);
+}
+
+void set_D(const String &str) {
+	int space_idx = str.indexOf(' ');
+
+	String D = str.substring(space_idx + 1, str.length() - 1);
+	pid.Kd = D.toFloat();
+
+	Serial.print("Set kd value to ");
+	Serial.println(pid.Kd);
+}
+
+void PIDor(const float &value)
+{
+	pid.input = value;
+
+	pump.set_speed(pid.getResultTimer());
+}
+
 void task_pressure_sensor_read(void *params)
 {
 	Adafruit_ADS1115 ads;
@@ -143,39 +203,54 @@ void task_pressure_sensor_read(void *params)
 	}
 
 	// Start continuous conversions.
-	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
+	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_2_3, /*continuous=*/true);
 
-	int32_t results = 0;
-	uint8_t counter = 0;
+	float k = 0.1;
+
+	float fill_value = 0;
+	char pressure_sensor_output_buffer[32];
+
+	pid.setDirection(NORMAL); // направление регулирования (NORMAL/REVERSE). ПО УМОЛЧАНИЮ СТОИТ NORMAL
+	pid.setLimits(1, 100);	// пределы (ставим для 8 битного ШИМ). ПО УМОЛЧАНИЮ СТОЯТ 0 И 255
+	pid.setpoint = 29;
 
 	for (;;) // A Task shall never return or exit.
 	{
-		if (counter > 9) {
-			if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
-			{
-				int32_t converted_value = float(results) * 7.8125 / 25;
-				// Serial.print("Differential: ");
-				Serial.println(converted_value / counter);
-				// Serial.print("(");
-				// Serial.print(ads.computeVolts(results));
-				// Serial.println("mV)");
+		// if (counter > 9) {
+		// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+		// {
+		if (is_data_transmitted == false)
+		{
+			int16_t raw_data = ads.getLastConversionResults();
+			float converted_value = raw_data * 7.8125 / 25;
 
-				xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
-			}
+			// if (abs(converted_value) < abs(fill_value) * 0.9) {
+			// 	converted_value = fill_value;
+			// }
 
-			results = 0;
-			counter = 0;
+			fill_value += (converted_value - fill_value) * k;
+
+			// sprintf(pressure_sensor_output_buffer, "%d %d\n", converted_value, fill_value);
+			// Serial.print(pressure_sensor_output_buffer);
+			// Serial.print(converted_value);
+			// Serial.print(' ');
+			Serial.println(fill_value);
+
+			PIDor(fill_value);
+			// Serial.print(converted_value);
+			// Serial.print(' ');
+			// Serial.println(fill_value);
 		}
-		else {
-			results += ads.getLastConversionResults();
-			++counter;
-		}
+		// Serial.print("Differential: ");
+		// Serial.println(converted_value / counter);
+		// Serial.print("(");
+		// Serial.print(ads.computeVolts(results));
+		// Serial.println("mV)");
 
-		
+		// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+		// }
 
-
-
-		vTaskDelay(6); // one tick delay (16ms) in between reads for stability
+		vTaskDelay(60); // one tick delay (16ms) in between reads for stability
 	}
 }
 
@@ -186,7 +261,7 @@ void task_draw_display(void *params)
 	extern uint8_t BigFont[];
 	extern uint8_t SevenSegNumFont[];
 	extern uint8_t BigFontRus[];
-	
+
 	const uint16_t dispMISO = 8;
 	const uint16_t dispSCK = 7;
 	const uint16_t dispCS = 6;
@@ -241,24 +316,28 @@ void task_CLI(void *params)
 		// USB input data
 		if (Serial.available() >= 1)
 		{
-			if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+			// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
+			// {
+			is_data_transmitted = true;
+
+			uint8_t buff[128];
+			uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
+
+			String message;
+
+			for (uint16_t i = 0; i < size; ++i)
 			{
-				uint8_t buff[128];
-				uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
-
-				String message;
-
-				for (uint16_t i = 0; i < size; ++i)
-				{
-					message.concat((char)buff[i]);
-				}
-
-				Serial.print("ECHO: ");
-				Serial.print(message);
-
-				parse_message(message);
-				xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+				message.concat((char)buff[i]);
 			}
+
+			Serial.print("ECHO: ");
+			Serial.print(message);
+
+			parse_message(message);
+
+			is_data_transmitted = false;
+			// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
+			// }
 		}
 
 		// if (Serial3.available() >= 1) {

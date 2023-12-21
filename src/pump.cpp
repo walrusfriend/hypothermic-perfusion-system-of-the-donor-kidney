@@ -87,8 +87,6 @@ void Pump::set_speed(const float &rmp)
     au16data[1] = p_float[0] | (p_float[1] << 8);
 
     is_new_modbus_message_ready = true;
-    Serial.print(au16data[0]);
-    Serial.println(au16data[1]);
     // master.query(speed_tg);
 }
 
