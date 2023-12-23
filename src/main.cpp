@@ -7,7 +7,7 @@
 #include "Pump.h"
 
 #include "GyverPID.h"
-#include "PIDtuner.h"
+#include "GyverTimers.h"
 
 void parse_message(const String &str);
 void pump_start_handler();
@@ -88,16 +88,29 @@ bool calibration_flag = false;
 bool block_flag = false;
 bool kidney_flag = false;
 
+int16_t temperature1 = 0;
+int16_t temperature2 = 0;
+
+uint8_t hours = 0;
+uint8_t mins = 0;
+uint8_t secs = 0;
+
 void task_pressure_sensor_read(void *params);
 void task_draw_display(void *params);
 void task_pump_control(void *params);
 void task_CLI(void *params);
 void task_process_buttons(void *params);
 void task_handle_error(void *params);
+void task_temperature_sensor(void *params);
 
 void setup()
 {
 	Serial.begin(115200);
+
+	// Configure and stop a timer (start by default)
+	Timer5.setFrequency(1);
+	Timer5.enableISR();
+	Timer5.pause();
 
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
 	xTaskCreate(task_draw_display, "DrawDisplay", 256, NULL, 2, NULL);
@@ -105,6 +118,7 @@ void setup()
 	xTaskCreate(task_CLI, "CLI", 256, NULL, 2, NULL);
 	xTaskCreate(task_process_buttons, "Buttons", 128, NULL, 2, NULL);
 	xTaskCreate(task_handle_error, "Errors", 128, NULL, 2, NULL);
+	xTaskCreate(task_temperature_sensor, "Temperature", 64, NULL, 2, NULL);
 }
 
 void loop() {}
@@ -296,10 +310,15 @@ void regime1_handler(const uint8_t &btnState)
 		if (regime_state == Regime::STOPED)
 		{
 			regime_state = Regime::REGIME1;
+			Timer5.restart();
+			hours = 0;
+			mins = 0;
+			secs = 0;
 		}
 		else if (regime_state == Regime::REGIME1)
 		{
 			regime_state = Regime::STOPED;
+			Timer5.stop();
 		}
 
 		Serial.print("INFO: Current regime after first button clicked is ");
@@ -383,6 +402,20 @@ void kidney_handler(const uint8_t &btnState)
 	if (!btnState && kidney_flag)
 	{
 		kidney_flag = false;
+	}
+}
+
+ISR(TIMER5_A) {
+	++secs;
+
+	if (secs > 59) {
+		secs = 0;
+		++mins;
+	}
+
+	if (mins > 59) {
+		mins = 0;
+		++hours;
 	}
 }
 
@@ -494,9 +527,6 @@ void task_draw_display(void *params)
 	float flow = 10.0;			// perfusion speed
 	float temperature_1 = 10.0; // value from temperature sensor 1
 	float temperature_2 = 10.0; // value from temperature sensor 2
-	int timer_hour = 10; // time in hours
-	int timer_min = 10;	 // time in mins
-	int timer_sec = 10;	 // time in sec
 
 	// объявляем объект myGLCD класса библиотеки UTFT указывая тип дисплея
 	UTFT myGLCD(TFT01_24SP, dispMISO,
@@ -547,9 +577,6 @@ void task_draw_display(void *params)
 		resistance = fill_value / flow;
 		temperature_1 = random(0, 50);
 		temperature_2 = random(0, 50);
-		timer_hour = random(24);
-		timer_min = random(60);
-		timer_sec = random(60);
 
 		myGLCD.setFont(SmallFont);	// set SmallFont
 		myGLCD.setColor(VGA_BLACK); // set black colour for fonts
@@ -591,9 +618,9 @@ void task_draw_display(void *params)
 		myGLCD.setFont(SmallFont);				  // set SmallFont
 		myGLCD.print("Procedure time", 186, 120); // print "Procedure time"
 
-		myGLCD.printNumF(timer_hour, 1, 186, 140); // print hours value
-		myGLCD.printNumF(timer_min, 1, 231, 140);  // print minutes value
-		myGLCD.printNumF(timer_sec, 1, 276, 140);  // print seconds value
+		myGLCD.printNumF(hours, 1, 186, 140); // print hours value
+		myGLCD.printNumF(mins, 1, 231, 140);  // print minutes value
+		myGLCD.printNumF(secs, 1, 276, 140);  // print seconds value
 
 		// Regime_output
 		myGLCD.setFont(BigFont); // set BigFont
@@ -760,50 +787,59 @@ void task_handle_error(void *params) {
 	{
 		/** TODO: Fix bug - fill_value may have pressure_up and
 		 * pressure_high errors */
-		if (fill_value > 30) {
-			alert[AlertType::PRESSURE_UP] = true;
-		}
-		else {
-			alert[AlertType::PRESSURE_UP] = false;
-		}
+		// if (fill_value > 30) {
+		// 	alert[AlertType::PRESSURE_UP] = true;
+		// }
+		// else {
+		// 	alert[AlertType::PRESSURE_UP] = false;
+		// }
 
-		if (fill_value < 28) {
-			// pump.stop();
-			// regime_state = Regime::STOPED;
-			alert[AlertType::PRESSURE_LOW] = true;
-		}
-		else {
-			alert[AlertType::PRESSURE_LOW] = false;
-		}
+		// if (fill_value < 28) {
+		// 	// pump.stop();
+		// 	// regime_state = Regime::STOPED;
+		// 	alert[AlertType::PRESSURE_LOW] = true;
+		// }
+		// else {
+		// 	alert[AlertType::PRESSURE_LOW] = false;
+		// }
 
-		if (fill_value > 40) {
-			// pump.stop();
-			// regime_state = Regime::STOPED;
-			alert[AlertType::PRESSURE_HIGH] = true;
-		}
-		else {
-			alert[AlertType::PRESSURE_HIGH] = false;
-		}
+		// if (fill_value > 40) {
+		// 	// pump.stop();
+		// 	// regime_state = Regime::STOPED;
+		// 	alert[AlertType::PRESSURE_HIGH] = true;
+		// }
+		// else {
+		// 	alert[AlertType::PRESSURE_HIGH] = false;
+		// }
 
-		if (resistance > 1.1) {
-			alert[AlertType::RESISTANCE] = true;
-		}
-		else {
-			alert[AlertType::RESISTANCE] = false;
-		}
+		// if (resistance > 1.1) {
+		// 	alert[AlertType::RESISTANCE] = true;
+		// }
+		// else {
+		// 	alert[AlertType::RESISTANCE] = false;
+		// }
 
-		/** TODO: Add other alert handlers */
+		// /** TODO: Add other alert handlers */
 		
-		bool is_error_occured = false;
-		for (uint8_t i = 1; i < alert_size; ++i) {
-			if (alert[i] == true) {
-				is_error_occured = true;
-				break;
-			}
-		}
+		// bool is_error_occured = false;
+		// for (uint8_t i = 1; i < alert_size; ++i) {
+		// 	if (alert[i] == true) {
+		// 		is_error_occured = true;
+		// 		break;
+		// 	}
+		// }
 
-		alert[AlertType::NONE] = !is_error_occured;
+		// alert[AlertType::NONE] = !is_error_occured;
 		
+
+		vTaskDelay(1000 / 16);
+	}
+}
+
+void task_temperature_sensor(void *params) {
+	/** TODO: Read the temperature */
+
+	for (;;) {
 
 		vTaskDelay(1000 / 16);
 	}
