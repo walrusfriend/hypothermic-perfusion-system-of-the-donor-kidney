@@ -32,13 +32,11 @@ void kidney_handler(const uint8_t &binState);
 
 const uint32_t PRESSURE_SENSOR_TICK_RATE = 100;
 
-// GyverPID pid(1, 1, 1, 960);
 GyverPID pid(0.2, 0.2, 0.2, PRESSURE_SENSOR_TICK_RATE);
 
 uint16_t target_pressure_value = 29;
-float fill_value = 0;
+float fill_value = 1;
 
-/** TODO: Store to EEPROM */
 float pressure_shift = 0;
 float resistance = 0;
 
@@ -102,6 +100,12 @@ uint8_t hours = 0;
 uint8_t mins = 0;
 uint8_t secs = 0;
 
+uint8_t error_timer_mins = 0;
+uint8_t error_timer_secs = 0;
+
+bool is_system_blocked = false;
+bool is_error_timer_start = false;
+
 void task_pressure_sensor_read(void *params);
 void task_draw_display(void *params);
 void task_pump_control(void *params);
@@ -117,11 +121,11 @@ void setup()
 	// Configure and stop a timer (start by default)
 	Timer5.setFrequency(1);
 	Timer5.enableISR();
-	Timer5.pause();
+	Timer5.stop();
 
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
 	xTaskCreate(task_draw_display, "DrawDisplay", 256, NULL, 2, NULL);
-	xTaskCreate(task_pump_control, "PumpControl", 256, NULL, 2, NULL);
+	xTaskCreate(task_pump_control, "PumpControl", 512, NULL, 2, NULL);
 	xTaskCreate(task_CLI, "CLI", 256, NULL, 2, NULL);
 	xTaskCreate(task_process_buttons, "Buttons", 128, NULL, 2, NULL);
 	xTaskCreate(task_handle_error, "Errors", 128, NULL, 2, NULL);
@@ -352,6 +356,7 @@ void regime2_handler(const uint8_t &btnState)
 		else if (regime_state == Regime::REGIME2)
 		{
 			regime_state = Regime::STOPED;
+			Timer5.stop();
 		}
 
 		Serial.print("INFO: Current regime after first button clicked is ");
@@ -431,6 +436,24 @@ ISR(TIMER5_A)
 	}
 }
 
+ISR(TIMER4_A)
+{
+	++error_timer_secs;
+
+	if (error_timer_secs > 59)
+	{
+		error_timer_secs = 0;
+		++error_timer_mins;
+	}
+
+	if (error_timer_mins == 10)
+	{
+		// Block the system
+		is_system_blocked = true;
+		pump.stop();
+	}
+}
+
 void task_pressure_sensor_read(void *params)
 {
 	Adafruit_ADS1115 ads;
@@ -446,28 +469,64 @@ void task_pressure_sensor_read(void *params)
 	// Start continuous conversions.
 	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_2_3, /*continuous=*/true);
 
-	float k = 0.1;
+	float k = 0.2;
 
 	pid.setDirection(NORMAL); // направление регулирования (NORMAL/REVERSE). ПО УМОЛЧАНИЮ СТОИТ NORMAL
 	pid.setLimits(1, 100);	  // пределы (ставим для 8 битного ШИМ). ПО УМОЛЧАНИЮ СТОЯТ 0 И 255
 	pid.setpoint = 29;
 
 	uint8_t counter = 0;
-	float sum = 0;
+	float pressure_sum = 0;
 
 	bool is_first_regime2_start = true;
 
+	float average_sistal[10];
+
 	for (;;) // A Task shall never return or exit.
 	{
-		if (counter > 9)
+		if (is_system_blocked)
+		{
+			vTaskDelay(1000);
+			continue;
+		}
+
+		if (counter >= 9)
 		{
 			if (is_data_transmitted == false)
 			{
-				fill_value += ((sum / counter) - fill_value) * k;
+				// fill_value += ((pressure_sum / counter) - fill_value) * k;
 				// Serial.println(fill_value);
 
+				int i, j;
+				bool swapped;
+				for (i = 0; i < 10 - 1; i++)
+				{
+					swapped = false;
+					for (j = 0; j < 10 - i - 1; j++)
+					{
+						if (average_sistal[j] > average_sistal[j + 1])
+						{
+							swap(float, average_sistal[j], average_sistal[j + 1]);
+							swapped = true;
+						}
+					}
+
+					// If no two elements were swapped
+					// by inner loop, then break
+					if (swapped == false)
+						break;
+				}
+
+				for (uint8_t i = 0; i < 5; ++i)
+				{
+					pressure_sum += average_sistal[4 + i];
+				}
+
+				float average_value = pressure_sum / 5;
+				fill_value += (average_value - fill_value) * k;
+
 				counter = 0;
-				sum = 0;
+				pressure_sum = 0;
 
 				if (regime_state == Regime::REGIME1)
 				{
@@ -512,11 +571,16 @@ void task_pressure_sensor_read(void *params)
 		}
 		else
 		{
-			++counter;
 			int16_t raw_data = ads.getLastConversionResults();
 			float converted_value = raw_data * 7.8125 / 25 - pressure_shift;
 
-			sum += converted_value;
+			// Serial.print(fill_value);
+			// Serial.print(' ');
+			// Serial.println(converted_value);
+
+			// pressure_sum += converted_value;
+			average_sistal[counter] = converted_value;
+			++counter;
 		}
 		vTaskDelay(PRESSURE_SENSOR_TICK_RATE / 16); // one tick delay (16ms) in between reads for stability
 	}
@@ -582,7 +646,8 @@ void task_draw_display(void *params)
 	for (;;)
 	{
 		// flow = pump.get_speed() * 0.8;
-		flow = pump.get_speed() * 0.35;
+		flow = pump.get_speed() * 0.6;
+		// flow = pump.get_speed() * 0.35;
 		resistance = fill_value / flow;
 
 		myGLCD.setFont(SmallFont);	// set SmallFont
@@ -622,6 +687,37 @@ void task_draw_display(void *params)
 		myGLCD.printNumF(temperature2, 1, 50, 143); // print Temperature_2 value
 		myGLCD.print("C", 95, 143);					// print "Temperature_2 unit"
 
+		myGLCD.setFont(BigFont);
+		myGLCD.setColor(VGA_RED);
+		if (alert[AlertType::TEMP1_HIGH])
+		{
+			myGLCD.print("HIGH", 115, 105);
+		}
+		else if (alert[AlertType::TEMP1_LOW])
+		{
+			myGLCD.print("LOW", 115, 105);
+		}
+		else
+		{
+			myGLCD.print("    ", 115, 105);
+		}
+
+		if (alert[AlertType::TEMP2_HIGH])
+		{
+			myGLCD.print("HIGH", 115, 138);
+		}
+		else if (alert[AlertType::TEMP2_LOW])
+		{
+			myGLCD.print("LOW", 115, 138);
+		}
+		else
+		{
+			myGLCD.print("    ", 115, 138);
+		}
+
+		myGLCD.setFont(SmallFont);
+		myGLCD.setColor(VGA_BLACK);
+
 		// Procedure time
 		myGLCD.setFont(SmallFont);				  // set SmallFont
 		myGLCD.print("Procedure time", 186, 120); // print "Procedure time"
@@ -644,6 +740,14 @@ void task_draw_display(void *params)
 		else if (regime_state == Regime::REGIME2)
 		{
 			myGLCD.print("Regime 2", 186, 6); // print "Regime 2"
+		}
+
+		if (is_system_blocked)
+		{
+			myGLCD.setColor(VGA_RED);
+			myGLCD.print("Blocked", 184, 173); // print "Blocked"
+			vTaskDelay(1000);
+			continue;
 		}
 
 		// myGLCD.drawRect(183, 170, 308, 190); // block state rectangle
@@ -710,6 +814,12 @@ void task_pump_control(void *params)
 {
 	for (;;)
 	{
+		if (is_system_blocked)
+		{
+			vTaskDelay(1000);
+			continue;
+		}
+
 		pump.process();
 		vTaskDelay(3);
 	}
@@ -720,6 +830,12 @@ void task_CLI(void *params)
 
 	for (;;)
 	{
+		if (is_system_blocked)
+		{
+			vTaskDelay(1000);
+			continue;
+		}
+
 		// USB input data
 		if (Serial.available() >= 1)
 		{
@@ -747,14 +863,9 @@ void task_CLI(void *params)
 			// }
 		}
 
-		/** TODO: Parse pump output and check that pump is available */
 		if (Serial3.available() >= 1)
 		{
 			Serial3.readBytes(pump.reply, Serial3.available());
-			// uint8_t buff[128];
-			// uint16_t size = Serial3.available();
-			// Serial3.readBytes(buff, size);
-			// Serial.write(buff, size);
 		}
 
 		vTaskDelay(5);
@@ -771,7 +882,7 @@ void task_process_buttons(void *params)
 
 	for (;;)
 	{
-		if (!is_blocked)
+		if (!is_blocked or is_system_blocked)
 		{
 			check_button(regime1);
 			check_button(regime2);
@@ -794,84 +905,147 @@ void task_handle_error(void *params)
 	const uint8_t TEMP_LOW_LIMIT = 4;
 	const uint8_t TEMP_HIGH_LIMIT = 10;
 
+	bool is_pressure_high_beat = false;
+
+	// Add 10 mins timer - if after 10 mins pressure doesn't fall, stop
+	// the system, if pressure fall below HIGH, stop the timer
+	Timer4.setFrequency(1);
+	Timer4.enableISR();
+
 	for (;;)
 	{
-		if (!is_pressure_stabilized) {
-			if (fill_value >= PRESSURE_STABLE_VALUE) {
-				is_pressure_stabilized = true;
+		if (is_system_blocked)
+		{
+			vTaskDelay(1000);
+			continue;
+		}
+
+		if (regime_state == Regime::REGIME1)
+		{
+			if (!is_pressure_stabilized)
+			{
+				if (fill_value >= PRESSURE_STABLE_VALUE)
+				{
+					is_pressure_stabilized = true;
+				}
 			}
 		}
 
-		if (is_pressure_stabilized) {
-			/** TODO: Fix bug - fill_value may have pressure_up and
-			 * pressure_high errors */
-			if (fill_value > PRESSURE_OPTIMAL_HIGH_LIMIT) {
+		if (is_pressure_stabilized and regime_state == Regime::REGIME1)
+		{
+			if (fill_value > PRESSURE_OPTIMAL_HIGH_LIMIT)
+			{
 				alert[AlertType::PRESSURE_UP] = true;
 				alert[AlertType::PRESSURE_HIGH] = false;
 				alert[AlertType::PRESSURE_LOW] = false;
 			}
-			else {
+			else
+			{
 				alert[AlertType::PRESSURE_UP] = false;
 			}
 
-			if (fill_value < PRESSURE_LOW_LIMIT) {
-				pump.stop();
-				regime_state = Regime::STOPED;
+			if (fill_value < PRESSURE_LOW_LIMIT)
+			{
+				// pump.stop();
+				// regime_state = Regime::STOPED;
 				alert[AlertType::PRESSURE_LOW] = true;
 				alert[AlertType::PRESSURE_UP] = false;
 				alert[AlertType::PRESSURE_HIGH] = false;
+
+				if (!is_error_timer_start)
+				{
+					Timer4.restart();
+					is_error_timer_start = true;
+				}
 			}
-			else {
+			else
+			{
 				alert[AlertType::PRESSURE_LOW] = false;
 			}
 
-			if (fill_value > PRESSURE_HIGH_LIMIT) {
+			if (fill_value > PRESSURE_HIGH_LIMIT)
+			{
 				pump.stop();
-				regime_state = Regime::STOPED;
+				// regime_state = Regime::STOPED;
 				alert[AlertType::PRESSURE_HIGH] = true;
 				alert[AlertType::PRESSURE_LOW] = false;
 				alert[AlertType::PRESSURE_UP] = false;
+
+				is_pressure_high_beat = true;
+
+				if (!is_error_timer_start)
+				{
+					Timer4.restart();
+					is_error_timer_start = true;
+				}
 			}
-			else {
+			else
+			{
 				alert[AlertType::PRESSURE_HIGH] = false;
 			}
 
-			if (resistance > 1.1) {
+			if (fill_value > 28 and fill_value < 40)
+			{
+				alert[AlertType::PRESSURE_HIGH] = false;
+				alert[AlertType::PRESSURE_LOW] = false;
+				alert[AlertType::PRESSURE_UP] = false;
+
+				Timer4.stop();
+				is_error_timer_start = false;
+
+				if (is_pressure_high_beat) {
+					pump.start();
+					regime_state = Regime::REGIME1;
+					is_pressure_high_beat = false;
+				}
+			}
+
+			if (resistance > 1.1)
+			{
 				alert[AlertType::RESISTANCE] = true;
 			}
-			else {
+			else
+			{
 				alert[AlertType::RESISTANCE] = false;
 			}
 
-			if (temperature1 < 4) {
+			if (temperature1 < TEMP_LOW_LIMIT)
+			{
 				alert[AlertType::TEMP1_LOW] = true;
 				alert[AlertType::TEMP1_HIGH] = false;
 			}
-			else if (temperature1 > 10) {
+			else if (temperature1 > TEMP_HIGH_LIMIT)
+			{
 				alert[AlertType::TEMP1_LOW] = false;
 				alert[AlertType::TEMP1_HIGH] = true;
 			}
-			else {
+			else
+			{
 				alert[AlertType::TEMP1_LOW] = false;
 				alert[AlertType::TEMP1_HIGH] = false;
 			}
 
-			if (temperature2 < 4) {
+			if (temperature2 < TEMP_LOW_LIMIT)
+			{
 				alert[AlertType::TEMP2_LOW] = true;
 				alert[AlertType::TEMP2_HIGH] = false;
 			}
-			else if (temperature2 > 10) {
+			else if (temperature2 > TEMP_HIGH_LIMIT)
+			{
 				alert[AlertType::TEMP2_LOW] = false;
 				alert[AlertType::TEMP2_HIGH] = true;
 			}
-			else {
+			else
+			{
 				alert[AlertType::TEMP2_LOW] = false;
 				alert[AlertType::TEMP2_HIGH] = false;
 			}
 
 			bool is_error_occured = false;
-			for (uint8_t i = 1; i < alert_size; ++i) {
-				if (alert[i] == true) {
+			for (uint8_t i = 1; i < alert_size; ++i)
+			{
+				if (alert[i] == true)
+				{
 					is_error_occured = true;
 					break;
 				}
@@ -894,6 +1068,12 @@ void task_temperature_sensor(void *params)
 
 	for (;;)
 	{
+		if (is_system_blocked)
+		{
+			vTaskDelay(1000);
+			continue;
+		}
+
 		sensor1.requestTemp();
 		sensor2.requestTemp();
 
