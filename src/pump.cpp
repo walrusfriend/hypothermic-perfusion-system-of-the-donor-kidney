@@ -7,7 +7,7 @@
  *  u8txenpin : 0 for RS-232 and USB-FTDI
  *               or any pin number > 1 for RS-485
  */
-Modbus master(0, Serial3, 0); // this is master and RS-232 or USB-FTDI
+Modbus master(0, Serial3, 3); // this is master and RS-232 or USB-FTDI
 
 Pump::Pump()
 {
@@ -39,7 +39,8 @@ Pump::Pump()
     master.start();
     master.setTimeOut(2000); // if there is no answer in 2000 ms, roll over
     u8state = 0;
-}
+
+ }
 
 Pump::~Pump()
 {
