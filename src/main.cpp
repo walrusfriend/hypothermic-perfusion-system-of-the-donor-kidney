@@ -2,7 +2,6 @@
 #include <semphr.h>
 
 #include <Adafruit_ADS1X15.h>
-#include "UTFT.h"
 
 #include "Pump.h"
 
@@ -107,7 +106,7 @@ bool is_system_blocked = false;
 bool is_error_timer_start = false;
 
 void task_pressure_sensor_read(void *params);
-void task_draw_display(void *params);
+void task_create_report(void *params);
 void task_pump_control(void *params);
 void task_CLI(void *params);
 void task_process_buttons(void *params);
@@ -124,7 +123,7 @@ void setup()
 	Timer5.stop();
 
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
-	xTaskCreate(task_draw_display, "DrawDisplay", 256, NULL, 2, NULL);
+	xTaskCreate(task_create_report, "CreateReport", 256, NULL, 2, NULL);
 	xTaskCreate(task_pump_control, "PumpControl", 512, NULL, 2, NULL);
 	xTaskCreate(task_CLI, "CLI", 256, NULL, 2, NULL);
 	xTaskCreate(task_process_buttons, "Buttons", 128, NULL, 2, NULL);
@@ -462,8 +461,7 @@ void task_pressure_sensor_read(void *params)
 	if (!ads.begin())
 	{
 		Serial.println("Failed to initialize ADS.");
-		while (1)
-			;
+		while (1);
 	}
 
 	// Start continuous conversions.
@@ -506,7 +504,10 @@ void task_pressure_sensor_read(void *params)
 					{
 						if (average_sistal[j] > average_sistal[j + 1])
 						{
-							swap(float, average_sistal[j], average_sistal[j + 1]);
+							// swap(float, average_sistal[j], average_sistal[j + 1]);
+							float tmp = average_sistal[j];
+							average_sistal[j] = average_sistal[j + 1];
+							average_sistal[j + 1] = tmp;
 							swapped = true;
 						}
 					}
@@ -586,225 +587,66 @@ void task_pressure_sensor_read(void *params)
 	}
 }
 
-void task_draw_display(void *params)
+/**
+ * Тут мы будем формировать отчёт с текущими параметрами системы
+ * Отправлять этот отчёт будет поток CLI
+ */
+void task_create_report(void *params)
 {
-	// подключаем шрифты
-	extern uint8_t SmallFont[];
-	extern uint8_t BigFont[];
+	float flow;
 
-	const uint16_t dispMISO = 8;
-	const uint16_t dispSCK = 7;
-	const uint16_t dispCS = 6;
-	const uint16_t dispRST = 5;
-	const uint16_t dispDC = 4;
-
-	float flow = 0; // perfusion speed
-
-	// объявляем объект myGLCD класса библиотеки UTFT указывая тип дисплея
-	UTFT myGLCD(TFT01_24SP, dispMISO,
-				dispSCK, dispCS,
-				dispRST, dispDC);
-
-	myGLCD.InitLCD();
-	myGLCD.fillScr(VGA_WHITE);		// fill screen with white colour
-	myGLCD.setColor(VGA_BLACK);		// set black colour for fonts
-	myGLCD.setFont(SmallFont);		// set SmallFont
-	myGLCD.setBackColor(VGA_WHITE); // set white colour for background colour
-
-	// Pressure value output
-	myGLCD.drawRect(70, 0, 110, 20);  // pressure value rectangle
-	myGLCD.drawRect(115, 0, 150, 20); // pressure value units rectangle
-	// Resistance value output
-	myGLCD.drawRect(85, 35, 125, 55);  // resistance value rectangle
-	myGLCD.drawRect(130, 35, 230, 55); // resistance value units rectangle
-	// Flow rate
-	myGLCD.drawRect(35, 70, 75, 90);  // flow value rectangle
-	myGLCD.drawRect(80, 70, 135, 90); // flow value units rectangle
-	// Temperature sensor 1
-	myGLCD.drawRect(45, 105, 85, 125);	// Temperature_1 value rectangle
-	myGLCD.drawRect(90, 105, 105, 125); // Temperature_1 value units rectangle
-	// Temperature sensor 2
-	myGLCD.drawRect(45, 140, 85, 160);	// Temperature_2 value rectangle
-	myGLCD.drawRect(90, 140, 105, 160); // Temperature_2 value units rectangle
-	// Procedure time
-	myGLCD.drawRect(183, 135, 218, 155); // timer_hour rectangle
-	myGLCD.drawRect(228, 135, 263, 155); // timer_min rectangle
-	myGLCD.drawRect(273, 135, 308, 155); // timer_sec rectangle
-	// Regime output
-	myGLCD.drawRect(183, 3, 315, 23); // Regime state rectangle
-	// Kidney
-	myGLCD.drawRect(220, 63, 315, 83); // Regime state rectangle
-	// Alarm
-	myGLCD.drawRect(10, 210, 100, 230); // Alarm state rectangle
-	// Alarm type
-	myGLCD.drawRect(183, 210, 315, 230); // Alarm type rectangle
-	// Block state
-	myGLCD.drawRect(183, 170, 305, 190); // block state rectangle
-
-	Serial.println("LCD initialized!");
+	char output[1024];
 
 	for (;;)
 	{
+		/** TODO: Use coefficients as a named constant */
 		// flow = pump.get_speed() * 0.8;
 		flow = pump.get_speed() * 0.6;
 		// flow = pump.get_speed() * 0.35;
+
 		resistance = fill_value / flow;
+		
+		sprintf(output,
+				"\nReport:\n"
+				"\tPressure: %f inHg\n"
+				"\tFlow: %f ml/min\n"
+				"\tResistance: %f inHg/ml/min\n"
+				"\tTemp1: %f C\n"
+				"\tTemp2: %f C\n"
+				"\tRegime: %d\n"
+				"\tKidney: %s\n"
+				"\ttime: %d:%d:%d\n"
+				"\terrors:\n"
+				"\t\tNONE: %d\n"
+				"\t\tPRESSURE_LOW: %d\n"
+				"\t\tPRESSURE_HIGH: %d\n"
+				"\t\tPRESSURE_UP: %d\n"
+				"\t\tTEMP1_LOW: %d\n"
+				"\t\tTEMP1_HIGH: %d\n"
+				"\t\tTEMP2_LOW: %d\n"
+				"\t\tTEMP2_HIGH: %d\n"
+				"\t\tRESISTANCE: %d\n"
+				"\tblocked: %d\n",
+				fill_value,
+				flow,
+				resistance,
+				temperature1,
+				temperature2,
+				regime_state,
+				(kidney_selector == KidneyState::LEFT_KIDNEY) ? "left" : "right",
+				hours, mins, secs,
+				alert[NONE],
+				alert[PRESSURE_LOW],
+				alert[PRESSURE_HIGH],
+				alert[PRESSURE_UP],
+				alert[TEMP1_LOW],
+				alert[TEMP1_HIGH],
+				alert[TEMP2_LOW],
+				alert[TEMP2_HIGH],
+				alert[RESISTANCE],
+				is_blocked);
 
-		myGLCD.setFont(SmallFont);	// set SmallFont
-		myGLCD.setColor(VGA_BLACK); // set black colour for fonts
-		// Pressure value output
-		myGLCD.print("Pressure", 0, 0);			// print "Pressure"
-		myGLCD.printNumF(fill_value, 1, 77, 3); // print pressure value
-		myGLCD.print("inHg", 118, 3);			// print "Pressure unit"
-
-		// Resistance value output
-		if (alert[AlertType::RESISTANCE])
-		{
-			myGLCD.setColor(VGA_RED);
-		}
-		else
-		{
-			myGLCD.setColor(VGA_BLACK);
-		}
-
-		myGLCD.print("Resistance", 0, 35);
-		myGLCD.setColor(VGA_BLACK);
-		myGLCD.printNumF(resistance, 1, 90, 38); // print resistance value
-		myGLCD.print("inHg/ml/min", 133, 38);	 // print "resistance unit"
-
-		// Flow rate
-		myGLCD.print("Flow", 0, 70);	   // print "flow"
-		myGLCD.printNumF(flow, 1, 40, 73); // print flow value
-		myGLCD.print("ml/min", 85, 73);	   // print "flow unit"
-
-		// Temperature sensor 1
-		myGLCD.print("Temp1", 0, 105);				// print "Temp_1"
-		myGLCD.printNumF(temperature1, 1, 50, 108); // print Temperature_1 value
-		myGLCD.print("C", 95, 108);					// print "Temperature_1 unit"
-
-		// Temperature sensor 2
-		myGLCD.print("Temp2", 0, 138);				// print "Temp_2"
-		myGLCD.printNumF(temperature2, 1, 50, 143); // print Temperature_2 value
-		myGLCD.print("C", 95, 143);					// print "Temperature_2 unit"
-
-		myGLCD.setFont(BigFont);
-		myGLCD.setColor(VGA_RED);
-		if (alert[AlertType::TEMP1_HIGH])
-		{
-			myGLCD.print("HIGH", 115, 105);
-		}
-		else if (alert[AlertType::TEMP1_LOW])
-		{
-			myGLCD.print("LOW", 115, 105);
-		}
-		else
-		{
-			myGLCD.print("    ", 115, 105);
-		}
-
-		if (alert[AlertType::TEMP2_HIGH])
-		{
-			myGLCD.print("HIGH", 115, 138);
-		}
-		else if (alert[AlertType::TEMP2_LOW])
-		{
-			myGLCD.print("LOW", 115, 138);
-		}
-		else
-		{
-			myGLCD.print("    ", 115, 138);
-		}
-
-		myGLCD.setFont(SmallFont);
-		myGLCD.setColor(VGA_BLACK);
-
-		// Procedure time
-		myGLCD.setFont(SmallFont);				  // set SmallFont
-		myGLCD.print("Procedure time", 186, 120); // print "Procedure time"
-
-		myGLCD.printNumI(hours, 186, 140, 2, ' '); // print hours value
-		myGLCD.printNumI(mins, 231, 140, 2, ' ');  // print minutes value
-		myGLCD.printNumI(secs, 276, 140, 2, ' ');  // print seconds value
-
-		// Regime_output
-		myGLCD.setFont(BigFont); // set BigFont
-		// print Regime
-		if (regime_state == Regime::STOPED)
-		{
-			myGLCD.print("Stopped ", 186, 6);
-		}
-		else if (regime_state == Regime::REGIME1)
-		{
-			myGLCD.print("Regime 1", 186, 6); // print "Regime 1"
-		}
-		else if (regime_state == Regime::REGIME2)
-		{
-			myGLCD.print("Regime 2", 186, 6); // print "Regime 2"
-		}
-
-		if (is_system_blocked)
-		{
-			myGLCD.setColor(VGA_RED);
-			myGLCD.print("Blocked", 184, 173); // print "Blocked"
-			vTaskDelay(1000);
-			continue;
-		}
-
-		// myGLCD.drawRect(183, 170, 308, 190); // block state rectangle
-		if (is_blocked == true)
-		{
-			myGLCD.print("Blocked", 184, 173); // print "Blocked"
-		}
-		else if (is_blocked == false)
-		{
-			myGLCD.print("       ", 184, 173); // print "Right"
-		}
-
-		// Kidney
-		// print Kidney
-		if (kidney_selector == KidneyState::RIGTH_KIDNEY)
-		{
-			myGLCD.print("RIGHT", 225, 66); // print "Right"
-		}
-		else if (kidney_selector == KidneyState::LEFT_KIDNEY)
-		{
-			myGLCD.print("LEFT ", 225, 66); // print "Right"
-		}
-
-		// Alarm
-		// print alarm state
-		if (alert[AlertType::NONE] == false)
-		{
-			myGLCD.setColor(VGA_RED);		// set black colour for fonts
-			myGLCD.print("ALARM", 13, 213); // print "ALARM"
-		}
-		else
-		{
-			myGLCD.print("     ", 13, 213); // print "ALARM"
-		}
-
-		// Alarm type
-		// print Alarm type
-		if (alert[AlertType::NONE])
-		{
-			myGLCD.print("        ", 186, 213); // print "ALARM TYPE"
-		}
-		else if (alert[AlertType::PRESSURE_HIGH])
-		{
-			myGLCD.print("PR-HIGH", 186, 213); // print "ALARM TYPE"
-		}
-		else if (alert[AlertType::PRESSURE_LOW])
-		{
-			myGLCD.print("PR-LOW ", 186, 213); // print "ALARM TYPE"
-		}
-		else if (alert[AlertType::PRESSURE_UP])
-		{
-			myGLCD.print("PR-UP  ", 186, 213); // print "ALARM TYPE"
-		}
-		else
-		{
-			myGLCD.print("        ", 186, 213); // print "ALARM TYPE"
-		}
+		Serial.print(output);
 
 		vTaskDelay(6);
 	}
