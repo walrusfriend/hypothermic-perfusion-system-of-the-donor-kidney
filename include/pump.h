@@ -1,4 +1,6 @@
-#pragma once
+#ifndef pump_h
+#define pump_h
+
 #include <Arduino.h>
 #include "ModbusRtu.h"
 
@@ -59,3 +61,5 @@ private:
     bool is_start_command_sent = false;
     bool is_set_speed_command_sent = false;
 };
+
+#endif

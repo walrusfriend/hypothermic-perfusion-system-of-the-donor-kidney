@@ -1,14 +1,20 @@
-#include <Arduino_FreeRTOS.h>
+#include "config.h"
 #include <semphr.h>
 
 #include <Adafruit_ADS1X15.h>
 
 #include "Pump.h"
+#include "custom_time.h"
 
 #include "GyverPID.h"
 #include "GyverTimers.h"
 
 #include <microDS18B20.h>
+
+/**
+ * TODO: Проверить, что треды не владеют общими ресурсами,
+ * иначе обвесить всё семафорами
+ */
 
 void parse_message(const String &str);
 void pump_start_handler();
@@ -32,6 +38,7 @@ void kidney_handler(const uint8_t &binState);
 const uint32_t PRESSURE_SENSOR_TICK_RATE = 100;
 
 GyverPID pid(0.2, 0.2, 0.2, PRESSURE_SENSOR_TICK_RATE);
+Pump pump;
 
 uint16_t target_pressure_value = 29;
 float fill_value = 1;
@@ -39,50 +46,15 @@ float fill_value = 1;
 float pressure_shift = 0;
 float resistance = 0;
 
-Pump pump;
-
 bool is_data_transmitted = false;
-
-enum Regime
-{
-	STOPED,
-	REGIME1,
-	REGIME2
-};
-
-enum KidneyState
-{
-	LEFT_KIDNEY,
-	RIGTH_KIDNEY
-};
-
-enum AlertType
-{
-	NONE,
-	PRESSURE_LOW,
-	PRESSURE_HIGH,
-	PRESSURE_UP,
-	TEMP1_LOW,
-	TEMP1_HIGH,
-	TEMP2_LOW,
-	TEMP2_HIGH,
-	RESISTANCE
-};
 
 const uint8_t alert_size = 9;
 bool alert[alert_size] = {1, 0, 0, 0, 0, 0, 0, 0, 0};
 
 KidneyState kidney_selector = KidneyState::LEFT_KIDNEY;
-
-bool is_blocked = false;
-
 Regime regime_state = Regime::STOPED;
 
-const uint8_t regime1 = 22;
-const uint8_t regime2 = 23;
-const uint8_t calibration = 24;
-const uint8_t block = 25;
-const uint8_t kidney = 26;
+bool is_blocked = false;
 
 bool regime1_flag = false;
 bool regime2_flag = false;
@@ -95,9 +67,7 @@ float temperature2 = 0;
 
 bool is_pressure_stabilized = false;
 
-uint8_t hours = 0;
-uint8_t mins = 0;
-uint8_t secs = 0;
+Time time {0, 0, 0};
 
 uint8_t error_timer_mins = 0;
 uint8_t error_timer_secs = 0;
@@ -293,19 +263,19 @@ void check_button(const uint8_t &button_number)
 	bool btnState = digitalRead(button_number);
 	switch (button_number)
 	{
-	case regime1:
+	case Pin::regime1:
 		regime1_handler(btnState);
 		break;
-	case regime2:
+	case Pin::regime2:
 		regime2_handler(btnState);
 		break;
-	case calibration:
+	case Pin::calibration:
 		calibration_handler(btnState);
 		break;
-	case block:
+	case Pin::block:
 		block_handler(btnState);
 		break;
-	case kidney:
+	case Pin::kidney:
 		kidney_handler(btnState);
 		break;
 	}
@@ -321,9 +291,7 @@ void regime1_handler(const uint8_t &btnState)
 		{
 			regime_state = Regime::REGIME1;
 			Timer5.restart();
-			hours = 0;
-			mins = 0;
-			secs = 0;
+			time.reset();
 
 			is_pressure_stabilized = false;
 		}
@@ -420,19 +388,7 @@ void kidney_handler(const uint8_t &btnState)
 
 ISR(TIMER5_A)
 {
-	++secs;
-
-	if (secs > 59)
-	{
-		secs = 0;
-		++mins;
-	}
-
-	if (mins > 59)
-	{
-		mins = 0;
-		++hours;
-	}
+	++time;
 }
 
 ISR(TIMER4_A)
@@ -482,19 +438,54 @@ void task_pressure_sensor_read(void *params)
 
 	for (;;) // A Task shall never return or exit.
 	{
+		/* Если система упала в блокировку, то тупо ничего не делаем */
 		if (is_system_blocked)
 		{
 			vTaskDelay(1000);
 			continue;
 		}
 
-		if (counter >= 9)
-		{
+		/**
+		 * Производим усреднение по 10-ти значениям
+		 * 
+		 * TODO: Загнать количество точек усреднения в константу или переменную,
+		 * если хотим управлять ей через СОМ порт
+		 * 
+		 * TODO: Можно сделать плавующую среднюю по последним N значениям
+		 */
+
+		if (counter < 10) {
+			/* Читаем данные с АЦП */
+			int16_t raw_data = ads.getLastConversionResults();
+
+			/* Преобразуем значение давления по формуле */
+			float converted_value = raw_data * 7.8125 / 25 - pressure_shift;
+
+			// Serial.print(fill_value);
+			// Serial.print(' ');
+			// Serial.println(converted_value);
+
+			// pressure_sum += converted_value;
+
+			/* Сохраняем средние значения */
+			average_sistal[counter] = converted_value;
+			++counter;
+		}
+		else {
+			/** TODO: А что мы тут проверяем?
+			 * Зачем нам блокировать вычисление средней, если идёт парсинг с СОМ порта?
+			 * Я так понимаю, тут мы производим усреднение\
+			 * Тут мы можем улететь в бесконечный цикл
+			 */
 			if (is_data_transmitted == false)
 			{
 				// fill_value += ((pressure_sum / counter) - fill_value) * k;
 				// Serial.println(fill_value);
 
+				/**
+				 * Сортировка позырьком, почему так? 
+				 * TODO: Применить нормальную сортировку
+				 */
 				int i, j;
 				bool swapped;
 				for (i = 0; i < 10 - 1; i++)
@@ -504,6 +495,7 @@ void task_pressure_sensor_read(void *params)
 					{
 						if (average_sistal[j] > average_sistal[j + 1])
 						{
+							/* Тут вообще swap отвалился */
 							// swap(float, average_sistal[j], average_sistal[j + 1]);
 							float tmp = average_sistal[j];
 							average_sistal[j] = average_sistal[j + 1];
@@ -518,17 +510,21 @@ void task_pressure_sensor_read(void *params)
 						break;
 				}
 
+				/* Выбираем элементы с 4-го по 8-й */
 				for (uint8_t i = 0; i < 5; ++i)
 				{
 					pressure_sum += average_sistal[4 + i];
 				}
 
+				/* Вычисляем среднее */
 				float average_value = pressure_sum / 5;
+
+				/* Душим скачки давления */
 				fill_value += (average_value - fill_value) * k;
 
-				counter = 0;
 				pressure_sum = 0;
 
+				/* В первом режиме включаем минимальную скорость и запускаем ПИД */
 				if (regime_state == Regime::REGIME1)
 				{
 					if (pump.get_state() == PumpStates::OFF)
@@ -540,6 +536,7 @@ void task_pressure_sensor_read(void *params)
 
 					PIDor(fill_value);
 				}
+				/* Во втором режиме просто шарашим на полную */
 				else if (regime_state == Regime::REGIME2)
 				{
 					if (is_first_regime2_start)
@@ -557,32 +554,27 @@ void task_pressure_sensor_read(void *params)
 						is_first_regime2_start = false;
 					}
 				}
+				/* Ну тут всё понятно */
 				else if (regime_state == Regime::STOPED)
 				{
 					if (pump.get_state() == PumpStates::ON)
 					{
 						pump.stop();
 						pump.set_speed(10);
-						vTaskDelay(1000 / 16);
+						// vTaskDelay(1000 / 16);
 					}
 
 					is_first_regime2_start = true;
 				}
 			}
-		}
-		else
-		{
-			int16_t raw_data = ads.getLastConversionResults();
-			float converted_value = raw_data * 7.8125 / 25 - pressure_shift;
 
-			// Serial.print(fill_value);
-			// Serial.print(' ');
-			// Serial.println(converted_value);
-
-			// pressure_sum += converted_value;
-			average_sistal[counter] = converted_value;
-			++counter;
+			/**
+			 * Обнуляем переменную, даже если не произвели вычисления,
+			 * иначе есть солидный шанс попасть в бесконечный цикл
+			 */
+			counter = 0;
 		}
+
 		vTaskDelay(PRESSURE_SENSOR_TICK_RATE / 16); // one tick delay (16ms) in between reads for stability
 	}
 }
@@ -634,7 +626,7 @@ void task_create_report(void *params)
 				temperature2,
 				regime_state,
 				(kidney_selector == KidneyState::LEFT_KIDNEY) ? "left" : "right",
-				hours, mins, secs,
+				time.get_hours(), time.get_mins(), time.get_secs(),
 				alert[NONE],
 				alert[PRESSURE_LOW],
 				alert[PRESSURE_HIGH],
@@ -695,9 +687,6 @@ void task_CLI(void *params)
 				message.concat((char)buff[i]);
 			}
 
-			// Serial.print("ECHO: ");
-			// Serial.print(message);
-
 			parse_message(message);
 
 			is_data_transmitted = false;
@@ -716,22 +705,22 @@ void task_CLI(void *params)
 
 void task_process_buttons(void *params)
 {
-	pinMode(regime1, INPUT);
-	pinMode(regime2, INPUT);
-	pinMode(calibration, INPUT);
-	pinMode(block, INPUT);
-	pinMode(kidney, INPUT);
+	pinMode(Pin::regime1, INPUT);
+	pinMode(Pin::regime2, INPUT);
+	pinMode(Pin::calibration, INPUT);
+	pinMode(Pin::block, INPUT);
+	pinMode(Pin::kidney, INPUT);
 
 	for (;;)
 	{
 		if (!is_blocked or is_system_blocked)
 		{
-			check_button(regime1);
-			check_button(regime2);
-			check_button(calibration);
-			check_button(kidney);
+			check_button(Pin::regime1);
+			check_button(Pin::regime2);
+			check_button(Pin::calibration);
+			check_button(Pin::kidney);
 		}
-		check_button(block);
+		check_button(Pin::block);
 
 		vTaskDelay(100 / 16);
 	}
