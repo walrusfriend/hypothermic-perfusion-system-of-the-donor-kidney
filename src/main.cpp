@@ -5,6 +5,7 @@
 
 #include "Pump.h"
 #include "custom_time.h"
+#include "bubble_remover.h"
 
 #include "GyverPID.h"
 #include "GyverTimers.h"
@@ -14,6 +15,8 @@
 /**
  * TODO: Проверить, что треды не владеют общими ресурсами,
  * иначе обвесить всё семафорами
+ * 
+ * TODO: Сейчас режим продувки, по идее, можно прервать с кнопки
  */
 
 void parse_message(const String &str);
@@ -54,6 +57,8 @@ bool alert[alert_size] = {1, 0, 0, 0, 0, 0, 0, 0, 0};
 KidneyState kidney_selector = KidneyState::LEFT_KIDNEY;
 Regime regime_state = Regime::STOPED;
 
+BubbleRemover bubble_remover;
+
 bool is_blocked = false;
 
 bool regime1_flag = false;
@@ -72,6 +77,8 @@ Time time {0, 0, 0};
 uint8_t error_timer_mins = 0;
 uint8_t error_timer_secs = 0;
 
+uint8_t remove_bubble_secs = 0;
+
 bool is_system_blocked = false;
 bool is_error_timer_start = false;
 
@@ -82,6 +89,7 @@ void task_CLI(void *params);
 void task_process_buttons(void *params);
 void task_handle_error(void *params);
 void task_temperature_sensor(void *params);
+void task_bubble_remover(void* params);
 
 void setup()
 {
@@ -92,6 +100,11 @@ void setup()
 	Timer5.enableISR();
 	Timer5.stop();
 
+	/* Настроим таймер для продувки пузырьков */
+	Timer3.setFrequency(1);		// Частота 1 Гц
+	Timer3.enableISR();
+	Timer3.stop();
+
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
 	xTaskCreate(task_create_report, "CreateReport", 256, NULL, 2, NULL);
 	xTaskCreate(task_pump_control, "PumpControl", 512, NULL, 2, NULL);
@@ -99,6 +112,7 @@ void setup()
 	xTaskCreate(task_process_buttons, "Buttons", 128, NULL, 2, NULL);
 	xTaskCreate(task_handle_error, "Errors", 128, NULL, 2, NULL);
 	xTaskCreate(task_temperature_sensor, "Temperature", 256, NULL, 2, NULL);
+	xTaskCreate(task_bubble_remover, "BubbleRemover", 128, NULL, 2, NULL);
 }
 
 void loop() {}
@@ -409,6 +423,20 @@ ISR(TIMER4_A)
 	}
 }
 
+ISR(TIMER3_A)
+{
+	++remove_bubble_secs;
+
+	/** 
+	 * По прошествии минуты обнуляем таймер и 
+	 * возвращаемся к нормальному режиму работы 
+	 */
+	if (remove_bubble_secs >= 60) {
+		bubble_remover.stop(regime_state);
+		remove_bubble_secs = 0;
+	}
+}
+
 void task_pressure_sensor_read(void *params)
 {
 	Adafruit_ADS1115 ads;
@@ -524,6 +552,7 @@ void task_pressure_sensor_read(void *params)
 
 				pressure_sum = 0;
 
+				/** TODO: Это нужно перенести в отдельный поток управления насосом!!! */
 				/* В первом режиме включаем минимальную скорость и запускаем ПИД */
 				if (regime_state == Regime::REGIME1)
 				{
@@ -552,6 +581,14 @@ void task_pressure_sensor_read(void *params)
 						}
 
 						is_first_regime2_start = false;
+					}
+				}
+				/* ANTIBALLBUSTING */
+				else if (regime_state == Regime::REGIME_REMOVE_KEBAB) {
+					pump.set_speed(PUMP_MAX_SPEED);
+
+					if (pump.get_state() == PumpStates::OFF) {
+						pump.start();
 					}
 				}
 				/* Ну тут всё понятно */
@@ -891,11 +928,8 @@ void task_handle_error(void *params)
 
 void task_temperature_sensor(void *params)
 {
-	const uint8_t temperature1_pin = 12;
-	const uint8_t temperature2_pin = 13;
-
-	MicroDS18B20<temperature1_pin> sensor1;
-	MicroDS18B20<temperature2_pin> sensor2;
+	MicroDS18B20<Pin::temperature1_pin> sensor1;
+	MicroDS18B20<Pin::temperature2_pin> sensor2;
 
 	for (;;)
 	{
@@ -919,5 +953,33 @@ void task_temperature_sensor(void *params)
 			Serial.println("error");
 
 		vTaskDelay(1000 / 16);
+	}
+}
+
+void task_bubble_remover(void* params) {
+
+	for (;;)
+	{
+		if (is_system_blocked)
+		{
+			vTaskDelay(1000);
+			continue;
+		}
+
+		/** 
+		 * TODO: Что делать, если система заметила второй пузырь
+		 * во время промывки первого?
+		 * Сейчас мы будем начинать всё сначала
+		 */
+
+		/* Проверяем состояние кнопки (датчика пузырьков) */
+		if (bubble_remover.is_bubble()) {
+			bubble_remover.start(regime_state);
+		}
+
+		/* Ставим минимальное ожидание в треде, чтобы не пропустить пузырёк */
+		/* Но пока поставим не сильно много, чтобы не было дребезка кнопки при эмуляции */
+		// vTaskDelay(1);
+		vTaskDelay(100 / 16);
 	}
 }
