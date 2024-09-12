@@ -105,6 +105,9 @@ void setup()
 	Timer3.enableISR();
 	Timer3.stop();
 
+
+	Serial.println("START");
+	
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
 	xTaskCreate(task_create_report, "CreateReport", 256, NULL, 2, NULL);
 	xTaskCreate(task_pump_control, "PumpControl", 512, NULL, 2, NULL);
@@ -297,7 +300,7 @@ void check_button(const uint8_t &button_number)
 
 void regime1_handler(const uint8_t &btnState)
 {
-	if (btnState && !regime1_flag)
+	if (!btnState && !regime1_flag)
 	{
 		regime1_flag = true;
 
@@ -318,7 +321,7 @@ void regime1_handler(const uint8_t &btnState)
 		Serial.print("INFO: Current regime after first button clicked is ");
 		Serial.println(regime_state);
 	}
-	if (!btnState && regime1_flag)
+	if (btnState && regime1_flag)
 	{
 		regime1_flag = false;
 	}
@@ -326,7 +329,7 @@ void regime1_handler(const uint8_t &btnState)
 
 void regime2_handler(const uint8_t &btnState)
 {
-	if (btnState && !regime2_flag)
+	if (!btnState && !regime2_flag)
 	{
 		regime2_flag = true;
 
@@ -340,10 +343,10 @@ void regime2_handler(const uint8_t &btnState)
 			Timer5.stop();
 		}
 
-		Serial.print("INFO: Current regime after first button clicked is ");
+		Serial.print("INFO: Current regime after second button clicked is ");
 		Serial.println(regime_state);
 	}
-	if (!btnState && regime2_flag)
+	if (btnState && regime2_flag)
 	{
 		regime2_flag = false;
 	}
@@ -351,7 +354,7 @@ void regime2_handler(const uint8_t &btnState)
 
 void calibration_handler(const uint8_t &btnState)
 {
-	if (btnState && !calibration_flag)
+	if (!btnState && !calibration_flag)
 	{
 		calibration_flag = true;
 		pressure_shift = fill_value;
@@ -359,7 +362,7 @@ void calibration_handler(const uint8_t &btnState)
 		Serial.print("INFO: Calibrated value is ");
 		Serial.println(pressure_shift);
 	}
-	if (!btnState && calibration_flag)
+	if (btnState && calibration_flag)
 	{
 		calibration_flag = false;
 	}
@@ -367,13 +370,18 @@ void calibration_handler(const uint8_t &btnState)
 
 void block_handler(const uint8_t &btnState)
 {
-	if (btnState && !block_flag)
+	if (!btnState && !block_flag)
 	{
 		block_flag = true;
 
 		is_blocked = !is_blocked;
+
+		if (is_blocked)
+			Serial.println("Block is activated");
+		else
+			Serial.println("Block is disabled");
 	}
-	if (!btnState && block_flag)
+	if (btnState && block_flag)
 	{
 		block_flag = false;
 	}
@@ -381,20 +389,22 @@ void block_handler(const uint8_t &btnState)
 
 void kidney_handler(const uint8_t &btnState)
 {
-	if (btnState && !kidney_flag)
+	if (!btnState && !kidney_flag)
 	{
 		kidney_flag = true;
 
 		if (kidney_selector == KidneyState::LEFT_KIDNEY)
 		{
 			kidney_selector = KidneyState::RIGTH_KIDNEY;
+			Serial.println("Right kidney selected");
 		}
 		else if (kidney_selector == KidneyState::RIGTH_KIDNEY)
 		{
 			kidney_selector = KidneyState::LEFT_KIDNEY;
+			Serial.println("Left kidney selected");
 		}
 	}
-	if (!btnState && kidney_flag)
+	if (btnState && kidney_flag)
 	{
 		kidney_flag = false;
 	}
@@ -431,10 +441,14 @@ ISR(TIMER3_A)
 	 * По прошествии минуты обнуляем таймер и 
 	 * возвращаемся к нормальному режиму работы 
 	 */
-	if (remove_bubble_secs >= 60) {
+	// if (remove_bubble_secs >= 60) {
+	if (remove_bubble_secs >= 5) {
 		bubble_remover.stop(regime_state);
 		remove_bubble_secs = 0;
+		regime_state = Regime::REGIME1;
+		Serial.println("Remove kebab complete");
 	}
+
 }
 
 void task_pressure_sensor_read(void *params)
@@ -448,8 +462,10 @@ void task_pressure_sensor_read(void *params)
 		while (1);
 	}
 
+	Serial.println("ADC initialized successfully");
+
 	// Start continuous conversions.
-	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_2_3, /*continuous=*/true);
+	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
 
 	float k = 0.2;
 
@@ -624,7 +640,10 @@ void task_create_report(void *params)
 {
 	float flow;
 
-	char output[1024];
+	// char output[1024];
+	// char output[] = "Report placeholder\n";
+
+	String output;
 
 	for (;;)
 	{
@@ -635,49 +654,86 @@ void task_create_report(void *params)
 
 		resistance = fill_value / flow;
 		
-		sprintf(output,
-				"\nReport:\n"
-				"\tPressure: %f inHg\n"
-				"\tFlow: %f ml/min\n"
-				"\tResistance: %f inHg/ml/min\n"
-				"\tTemp1: %f C\n"
-				"\tTemp2: %f C\n"
-				"\tRegime: %d\n"
-				"\tKidney: %s\n"
-				"\ttime: %d:%d:%d\n"
-				"\terrors:\n"
-				"\t\tNONE: %d\n"
-				"\t\tPRESSURE_LOW: %d\n"
-				"\t\tPRESSURE_HIGH: %d\n"
-				"\t\tPRESSURE_UP: %d\n"
-				"\t\tTEMP1_LOW: %d\n"
-				"\t\tTEMP1_HIGH: %d\n"
-				"\t\tTEMP2_LOW: %d\n"
-				"\t\tTEMP2_HIGH: %d\n"
-				"\t\tRESISTANCE: %d\n"
-				"\tblocked: %d\n",
-				fill_value,
-				flow,
-				resistance,
-				temperature1,
-				temperature2,
-				regime_state,
-				(kidney_selector == KidneyState::LEFT_KIDNEY) ? "left" : "right",
-				time.get_hours(), time.get_mins(), time.get_secs(),
-				alert[NONE],
-				alert[PRESSURE_LOW],
-				alert[PRESSURE_HIGH],
-				alert[PRESSURE_UP],
-				alert[TEMP1_LOW],
-				alert[TEMP1_HIGH],
-				alert[TEMP2_LOW],
-				alert[TEMP2_HIGH],
-				alert[RESISTANCE],
-				is_blocked);
+		output += "\nReport:\n";
+		output += "\tPressure: ";
+		output += fill_value;
+		output += " inHg\n";
+
+		output += "\tFlow: ";
+		output += flow;
+		output += " ml/min\n";
+
+		output += "\tResistance: ";
+		output += resistance;
+		output += " inHg/ml/min\n";
+
+		output += "\tTemp1: ";
+		output += temperature1;
+		output += " C\n";
+		
+		output += "\tTemp2: ";
+		output += temperature2;
+		output += " C\n";
+		
+		output += "\tRegime: ";
+		output += regime_state;
+		output += "\n";
+		
+		output += "\tKidney: ";
+		output += (kidney_selector == KidneyState::LEFT_KIDNEY) ? "left" : "right";
+		output += "\n";
+		
+		output += "\ttime: ";
+		output += time.get_hours() + ':' + time.get_mins() + ':' + time.get_secs();
+		output += "\n";
+		
+		output += "\terrors: \n";
+		output += "\t\tNONE: ";
+		output += alert[NONE];
+		output += "\n";
+		
+		output += "\t\tPRESSURE_LOW: ";
+		output += alert[PRESSURE_LOW];
+		output += "\n";
+		
+		output += "\t\tPRESSURE_HIGH: ";
+		output += alert[PRESSURE_HIGH];
+		output += "\n";
+		
+		output += "\t\tPRESSURE_UP: ";
+		output += alert[PRESSURE_UP];
+		output += "\n";
+		
+		output += "\t\tTEMP1_LOW: ";
+		output += alert[TEMP1_LOW];
+		output += "\n";
+		
+		output += "\t\tTEMP1_HIGH: ";
+		output += alert[TEMP1_HIGH];
+		output += "\n";
+		
+		output += "\t\tTEMP2_LOW: ";
+		output += alert[TEMP2_LOW];
+		output += "\n";
+		
+		output += "\t\tTEMP2_HIGH: ";
+		output += alert[TEMP2_HIGH];
+		output += "\n";
+		
+		output += "\t\tRESISTANCE: ";
+		output += alert[RESISTANCE];
+		output += "\n";
+		
+		output += "\tblocked: ";
+		output += is_blocked;
+		output += "\n";
 
 		Serial.print(output);
 
-		vTaskDelay(6);
+		output = "";
+
+		// vTaskDelay(6);
+		vTaskDelay(60);
 	}
 }
 
@@ -742,11 +798,11 @@ void task_CLI(void *params)
 
 void task_process_buttons(void *params)
 {
-	pinMode(Pin::regime1, INPUT);
-	pinMode(Pin::regime2, INPUT);
-	pinMode(Pin::calibration, INPUT);
-	pinMode(Pin::block, INPUT);
-	pinMode(Pin::kidney, INPUT);
+	pinMode(Pin::regime1, INPUT_PULLUP);
+	pinMode(Pin::regime2, INPUT_PULLUP);
+	pinMode(Pin::calibration, INPUT_PULLUP);
+	pinMode(Pin::block, INPUT_PULLUP);
+	pinMode(Pin::kidney, INPUT_PULLUP);
 
 	for (;;)
 	{
@@ -974,12 +1030,13 @@ void task_bubble_remover(void* params) {
 
 		/* Проверяем состояние кнопки (датчика пузырьков) */
 		if (bubble_remover.is_bubble()) {
+			Serial.println("Bubble emulated");
 			bubble_remover.start(regime_state);
 		}
 
 		/* Ставим минимальное ожидание в треде, чтобы не пропустить пузырёк */
 		/* Но пока поставим не сильно много, чтобы не было дребезка кнопки при эмуляции */
 		// vTaskDelay(1);
-		vTaskDelay(100 / 16);
+		vTaskDelay(200 / 16);
 	}
 }

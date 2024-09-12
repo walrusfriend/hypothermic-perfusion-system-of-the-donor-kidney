@@ -4,15 +4,21 @@
 #include <Arduino_FreeRTOS.h>
 
 namespace Pin {
-    const uint8_t regime1 = 22;
-    const uint8_t regime2 = 23;
-    const uint8_t calibration = 24;
-    const uint8_t block = 25;
-    const uint8_t kidney = 26;
+    // const uint8_t regime1 = 30;					// yellow  	- block
+    // const uint8_t regime2 = 44; 				// green	- regime 2
+    // const uint8_t calibration = 40;				// white	- kidney
+    // const uint8_t block = 30;					// black	- calibration
+    // const uint8_t kidney = 25;					// blue		- regime 1
+
+    const uint8_t regime1 = 30;					// yellow  	- block
+    const uint8_t regime2 = 44; 				// green	- regime 2
+    const uint8_t calibration = 25;				// white	- kidney
+    const uint8_t block = 40;					// black	- calibration
+    const uint8_t kidney = 49;					// blue		- regime 1
     const uint8_t temperature1_pin = 12;
 	const uint8_t temperature2_pin = 13;
-    const uint8_t emulator_button_pin = 0xff;
-    const uint8_t MOSFET_pin = 0xff;
+    const uint8_t emulator_button_pin = 35;
+    const uint8_t MOSFET_pin = 36;
 };
 
 namespace Pressure {
