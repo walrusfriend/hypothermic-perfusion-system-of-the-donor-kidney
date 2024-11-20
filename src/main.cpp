@@ -286,14 +286,17 @@ void set_tv(const String &str)
 
 void start_handler(const String& message) {
 	Timer5.resume();
+	regime_state = Regime::REGIME1;
 }
 
 void pause_handler(const String& message) {
 	Timer5.pause();
+	regime_state = Regime::STOPED;
 }
 
 void stop_handler(const String& message) {
 	Timer5.stop();
+	regime_state = Regime::STOPED;
 
 	time.set_hours(0);
 	time.set_mins(0);
