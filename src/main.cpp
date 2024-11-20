@@ -6,6 +6,7 @@
 #include "Pump.h"
 #include "custom_time.h"
 #include "bubble_remover.h"
+#include "CLI.h"
 
 #include "GyverPID.h"
 #include "GyverTimers.h"
@@ -28,6 +29,10 @@ void set_P(const String &str);
 void set_I(const String &str);
 void set_D(const String &str);
 void set_tv(const String &str);
+void start_handler(const String& str);
+void pause_handler(const String& str);
+void stop_handler(const String& str);
+void regime_handler(const String& str);
 
 void PIDor(const float &value);
 void check_button(const uint8_t &button_number);
@@ -44,7 +49,7 @@ GyverPID pid(0.2, 0.2, 0.2, PRESSURE_SENSOR_TICK_RATE);
 Pump pump;
 
 uint16_t target_pressure_value = 29;
-float fill_value = 1;
+float pressure = 1;
 
 float pressure_shift = 0;
 float resistance = 0;
@@ -82,8 +87,43 @@ uint8_t remove_bubble_secs = 0;
 bool is_system_blocked = false;
 bool is_error_timer_start = false;
 
+/**
+ * float -> uin32_t -> 4 bytes * 4 -> 16 bytes for all float values
+ * uint8_t -> 1 byte * 3 -> 3 bytes for all uint8_t values
+ * Time -> 3 byte
+ * alert array -> 9 bytes
+ * 
+ * Pack regime_state, kidney_selector and block state to 1 byte
+ * Regime_state takes 2 bits now, give 3 bits for future
+ * kidney_selector takes only 1 bit
+ * block_state takes only 1 bit too
+ * 
+ * Delete first alert byte (which is NONE) and pack it to 1 byte
+ * 
+ * floats + time + packed byte 1 + alert byte =
+ * 20 + 3 + 1 + 1 = 25 + \n = 26
+ * 
+ * UPDATE:
+ * We can delete resistance from transmission
+ * 16 + 3 + 1 + 1 = 21 + \n = 22
+ */
+const uint8_t TO_SEND_ARRAY_SIZE = 22;
+uint8_t to_send[TO_SEND_ARRAY_SIZE];
+
+static const Command command_list[] = {
+	Command("start", start_handler),
+	Command("pause", pause_handler),
+	Command("stop", stop_handler),
+	Command("regime", regime_handler),
+	Command("set_speed", set_pump_rotation_speed_handler),
+	Command("set_rotate_direction", set_pump_rotate_direction),
+	Command("set_P", set_P),
+	Command("set_I", set_I),
+	Command("set_D", set_D),
+	Command("set_tv", set_tv)
+};
+
 void task_pressure_sensor_read(void *params);
-void task_create_report(void *params);
 void task_pump_control(void *params);
 void task_CLI(void *params);
 void task_process_buttons(void *params);
@@ -93,6 +133,8 @@ void task_bubble_remover(void* params);
 
 void setup()
 {
+	to_send[TO_SEND_ARRAY_SIZE - 1] = '\n';
+
 	Serial.begin(115200);
 
 	// Configure and stop a timer (start by default)
@@ -105,11 +147,9 @@ void setup()
 	Timer3.enableISR();
 	Timer3.stop();
 
-
 	Serial.println("START");
 	
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
-	xTaskCreate(task_create_report, "CreateReport", 256, NULL, 2, NULL);
 	xTaskCreate(task_pump_control, "PumpControl", 512, NULL, 2, NULL);
 	xTaskCreate(task_CLI, "CLI", 256, NULL, 2, NULL);
 	xTaskCreate(task_process_buttons, "Buttons", 128, NULL, 2, NULL);
@@ -120,44 +160,18 @@ void setup()
 
 void loop() {}
 
-void parse_message(const String &str)
+void parse_message(const String &message)
 {
-	if (str.startsWith("start"))
+	for (uint8_t i = 0; i < sizeof(command_list); ++i)
 	{
-		pump_start_handler();
+		if (message.startsWith(command_list[i].name))
+		{
+			command_list[i].handler(message);
+			return;
+		}
 	}
-	else if (str.startsWith("stop"))
-	{
-		pump_stop_handler();
-	}
-	else if (str.startsWith("set_speed"))
-	{
-		set_pump_rotation_speed_handler(str);
-	}
-	else if (str.startsWith("set_rotate_direction"))
-	{
-		set_pump_rotate_direction(str);
-	}
-	else if (str.startsWith("set_P"))
-	{
-		set_P(str);
-	}
-	else if (str.startsWith("set_I"))
-	{
-		set_I(str);
-	}
-	else if (str.startsWith("set_D"))
-	{
-		set_D(str);
-	}
-	else if (str.startsWith("set_tv"))
-	{
-		set_tv(str);
-	}
-	else
-	{
-		Serial.println("ERROR: Unknown command!");
-	}
+
+	Serial.println("ERROR: Unknown command!");
 }
 
 void pump_start_handler()
@@ -269,6 +283,35 @@ void set_tv(const String &str)
 	// Serial.println(target_value);
 }
 
+
+void start_handler(const String& message) {
+	Timer5.resume();
+}
+
+void pause_handler(const String& message) {
+	Timer5.pause();
+}
+
+void stop_handler(const String& message) {
+	Timer5.stop();
+
+	time.set_hours(0);
+	time.set_mins(0);
+	time.set_secs(0);
+}
+
+void regime_handler(const String& message) {
+	/* Handle invalid input */
+	if (message.length() == 0)
+		return;
+
+	char input_regime = message[message.length() - 1];
+
+	if (isDigit(input_regime)) {
+		regime_state = static_cast<Regime>(input_regime - '0');
+	}
+}
+
 void PIDor(const float &value)
 {
 	pid.input = value;
@@ -357,7 +400,7 @@ void calibration_handler(const uint8_t &btnState)
 	if (!btnState && !calibration_flag)
 	{
 		calibration_flag = true;
-		pressure_shift = fill_value;
+		pressure_shift = pressure;
 
 		Serial.print("INFO: Calibrated value is ");
 		Serial.println(pressure_shift);
@@ -412,7 +455,58 @@ void kidney_handler(const uint8_t &btnState)
 
 ISR(TIMER5_A)
 {
+	/* Write flow */
+	float flow = pump.get_speed() * 0.6;
+	uint8_t* magic = ((uint8_t*)(&flow));
+	uint8_t* p_writer = to_send;
+
+	for(uint8_t i = 0; i < 4; i++) {
+		*(p_writer++) = magic[i];
+	}
+
+	/* Write pressure */
+	magic = ((uint8_t*)(&pressure));
+
+	for(uint8_t i = 0; i < 4; i++) {
+		*(p_writer++) = magic[i];
+	}
+
+	/* Write temp1 */
+	magic = ((uint8_t*)(&temperature1));
+
+	for(uint8_t i = 0; i < 4; i++) {
+		*(p_writer++) = magic[i];
+	}
+
+	/* Write temp2 */
+	magic = ((uint8_t*)(&temperature2));
+
+	for(uint8_t i = 0; i < 4; i++) {
+		*(p_writer++) = magic[i];
+	}
+
+	/* Write time */
+	*(p_writer++) = time.get_hours();
+	*(p_writer++) = time.get_mins();
+	*(p_writer++) = time.get_secs();
+
+	/* Write packed regime + kidney_selector + is_blocked */
+	uint8_t packed_byte = (regime_state) | 
+						  (kidney_selector << 3) |
+						  (is_blocked << 4);
+	*(p_writer++) = packed_byte;
+
+	/* Write alert */
+	/* Skip first code - NONE */
+	uint8_t alert_byte = 0;
+	for (uint8_t i = 1; i < alert_size; i++) {
+		alert_byte |= (alert[i] & 0b1) << (i - 1);
+	}
+	*(p_writer++) = alert_byte;
+
 	++time;
+
+	Serial.write(to_send, TO_SEND_ARRAY_SIZE);
 }
 
 ISR(TIMER4_A)
@@ -505,7 +599,7 @@ void task_pressure_sensor_read(void *params)
 			/* Преобразуем значение давления по формуле */
 			float converted_value = raw_data * 7.8125 / 25 - pressure_shift;
 
-			// Serial.print(fill_value);
+			// Serial.print(pressure);
 			// Serial.print(' ');
 			// Serial.println(converted_value);
 
@@ -523,8 +617,8 @@ void task_pressure_sensor_read(void *params)
 			 */
 			if (is_data_transmitted == false)
 			{
-				// fill_value += ((pressure_sum / counter) - fill_value) * k;
-				// Serial.println(fill_value);
+				// pressure += ((pressure_sum / counter) - pressure) * k;
+				// Serial.println(pressure);
 
 				/**
 				 * Сортировка позырьком, почему так? 
@@ -564,7 +658,7 @@ void task_pressure_sensor_read(void *params)
 				float average_value = pressure_sum / 5;
 
 				/* Душим скачки давления */
-				fill_value += (average_value - fill_value) * k;
+				pressure += (average_value - pressure) * k;
 
 				pressure_sum = 0;
 
@@ -579,7 +673,7 @@ void task_pressure_sensor_read(void *params)
 						pump.start();
 					}
 
-					PIDor(fill_value);
+					PIDor(pressure);
 				}
 				/* Во втором режиме просто шарашим на полную */
 				else if (regime_state == Regime::REGIME2)
@@ -632,111 +726,6 @@ void task_pressure_sensor_read(void *params)
 	}
 }
 
-/**
- * Тут мы будем формировать отчёт с текущими параметрами системы
- * Отправлять этот отчёт будет поток CLI
- */
-void task_create_report(void *params)
-{
-	float flow;
-
-	// char output[1024];
-	// char output[] = "Report placeholder\n";
-
-	String output;
-
-	for (;;)
-	{
-		/** TODO: Use coefficients as a named constant */
-		// flow = pump.get_speed() * 0.8;
-		flow = pump.get_speed() * 0.6;
-		// flow = pump.get_speed() * 0.35;
-
-		resistance = fill_value / flow;
-		
-		output += "\nReport:\n";
-		output += "\tPressure: ";
-		output += fill_value;
-		output += " inHg\n";
-
-		output += "\tFlow: ";
-		output += flow;
-		output += " ml/min\n";
-
-		output += "\tResistance: ";
-		output += resistance;
-		output += " inHg/ml/min\n";
-
-		output += "\tTemp1: ";
-		output += temperature1;
-		output += " C\n";
-		
-		output += "\tTemp2: ";
-		output += temperature2;
-		output += " C\n";
-		
-		output += "\tRegime: ";
-		output += regime_state;
-		output += "\n";
-		
-		output += "\tKidney: ";
-		output += (kidney_selector == KidneyState::LEFT_KIDNEY) ? "left" : "right";
-		output += "\n";
-		
-		output += "\ttime: ";
-		output += time.get_hours() + ':' + time.get_mins() + ':' + time.get_secs();
-		output += "\n";
-		
-		output += "\terrors: \n";
-		output += "\t\tNONE: ";
-		output += alert[NONE];
-		output += "\n";
-		
-		output += "\t\tPRESSURE_LOW: ";
-		output += alert[PRESSURE_LOW];
-		output += "\n";
-		
-		output += "\t\tPRESSURE_HIGH: ";
-		output += alert[PRESSURE_HIGH];
-		output += "\n";
-		
-		output += "\t\tPRESSURE_UP: ";
-		output += alert[PRESSURE_UP];
-		output += "\n";
-		
-		output += "\t\tTEMP1_LOW: ";
-		output += alert[TEMP1_LOW];
-		output += "\n";
-		
-		output += "\t\tTEMP1_HIGH: ";
-		output += alert[TEMP1_HIGH];
-		output += "\n";
-		
-		output += "\t\tTEMP2_LOW: ";
-		output += alert[TEMP2_LOW];
-		output += "\n";
-		
-		output += "\t\tTEMP2_HIGH: ";
-		output += alert[TEMP2_HIGH];
-		output += "\n";
-		
-		output += "\t\tRESISTANCE: ";
-		output += alert[RESISTANCE];
-		output += "\n";
-		
-		output += "\tblocked: ";
-		output += is_blocked;
-		output += "\n";
-
-		Serial.print(output);
-
-		output = "";
-
-		// vTaskDelay(6);
-		vTaskDelay(60);
-	}
-}
-
 void task_pump_control(void *params)
 {
 	for (;;)
@@ -763,28 +752,20 @@ void task_CLI(void *params)
 			continue;
 		}
 
-		// USB input data
 		if (Serial.available() >= 1)
 		{
-			// if (xSemaphoreTake(xSerialSemaphore, (TickType_t)5) == pdTRUE)
-			// {
 			is_data_transmitted = true;
 
-			uint8_t buff[128];
-			uint16_t size = Serial.readBytesUntil('\n', buff, Serial.available());
+			char sym[64];
+			int size = Serial.readBytesUntil('\n', sym, 100);
+			sym[size] = '\0';
 
-			String message;
+			// Serial.println("Receive message: ");
+			// Serial.print(sym);
 
-			for (uint16_t i = 0; i < size; ++i)
-			{
-				message.concat((char)buff[i]);
-			}
-
-			parse_message(message);
+			parse_message(String(sym));
 
 			is_data_transmitted = false;
-			// 	xSemaphoreGive(xSerialSemaphore); // Now free or "Give" the Serial Port for others.
-			// }
 		}
 
 		if (Serial3.available() >= 1)
@@ -848,7 +829,7 @@ void task_handle_error(void *params)
 		{
 			if (!is_pressure_stabilized)
 			{
-				if (fill_value >= PRESSURE_STABLE_VALUE)
+				if (pressure >= PRESSURE_STABLE_VALUE)
 				{
 					is_pressure_stabilized = true;
 				}
@@ -857,7 +838,7 @@ void task_handle_error(void *params)
 
 		if (is_pressure_stabilized and regime_state == Regime::REGIME1)
 		{
-			if (fill_value > PRESSURE_OPTIMAL_HIGH_LIMIT)
+			if (pressure > PRESSURE_OPTIMAL_HIGH_LIMIT)
 			{
 				alert[AlertType::PRESSURE_UP] = true;
 				alert[AlertType::PRESSURE_HIGH] = false;
@@ -868,7 +849,7 @@ void task_handle_error(void *params)
 				alert[AlertType::PRESSURE_UP] = false;
 			}
 
-			if (fill_value < PRESSURE_LOW_LIMIT)
+			if (pressure < PRESSURE_LOW_LIMIT)
 			{
 				// pump.stop();
 				// regime_state = Regime::STOPED;
@@ -887,7 +868,7 @@ void task_handle_error(void *params)
 				alert[AlertType::PRESSURE_LOW] = false;
 			}
 
-			if (fill_value > PRESSURE_HIGH_LIMIT)
+			if (pressure > PRESSURE_HIGH_LIMIT)
 			{
 				pump.stop();
 				// regime_state = Regime::STOPED;
@@ -908,7 +889,7 @@ void task_handle_error(void *params)
 				alert[AlertType::PRESSURE_HIGH] = false;
 			}
 
-			if (fill_value > 28 and fill_value < 40)
+			if (pressure > 28 and pressure < 40)
 			{
 				alert[AlertType::PRESSURE_HIGH] = false;
 				alert[AlertType::PRESSURE_LOW] = false;
