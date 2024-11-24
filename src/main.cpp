@@ -147,8 +147,6 @@ void setup()
 	Timer3.enableISR();
 	Timer3.stop();
 
-	Serial.println("START");
-	
 	xTaskCreate(task_pressure_sensor_read, "PressureRead", 128, NULL, 2, NULL);
 	xTaskCreate(task_pump_control, "PumpControl", 512, NULL, 2, NULL);
 	xTaskCreate(task_CLI, "CLI", 256, NULL, 2, NULL);
@@ -176,13 +174,11 @@ void parse_message(const String &message)
 
 void pump_start_handler()
 {
-	Serial.println("INFO: The pump is started!");
 	pump.start();
 }
 
 void pump_stop_handler()
 {
-	Serial.println("INFO: The pump is stopped!");
 	pump.stop();
 }
 
@@ -214,6 +210,8 @@ void set_pump_rotation_speed_handler(const String &str)
 	String float_str = str.substring(space_idx + 1, LF_idx);
 
 	float pump_rmp = float_str.toFloat();
+
+	/** TODO: Add command reply to Qt program */
 
 	Serial.print("DEBUG: Set speed value to ");
 	Serial.println(pump_rmp);
