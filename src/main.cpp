@@ -572,12 +572,9 @@ void task_pressure_sensor_read(void *params)
 
 	uint8_t counter = 0;
 	float pressure_sum = 0;
-
-	bool is_first_regime2_start = true;
-
 	float average_sistal[10];
 
-	for (;;) // A Task shall never return or exit.
+	for (;;)
 	{
 		/* Если система упала в блокировку, то тупо ничего не делаем */
 		if (is_system_blocked)
@@ -602,12 +599,6 @@ void task_pressure_sensor_read(void *params)
 			/* Преобразуем значение давления по формуле */
 			float converted_value = raw_data * 7.8125 / 25 - pressure_shift;
 
-			// Serial.print(pressure);
-			// Serial.print(' ');
-			// Serial.println(converted_value);
-
-			// pressure_sum += converted_value;
-
 			/* Сохраняем средние значения */
 			average_sistal[counter] = converted_value;
 			++counter;
@@ -627,6 +618,15 @@ void task_pressure_sensor_read(void *params)
 				 * Сортировка позырьком, почему так? 
 				 * TODO: Применить нормальную сортировку
 				 */
+
+				/** TODO: Check new sort function */
+				// qsort(average_sistal, counter, sizeof(average_sistal[0]), 
+				// 	[](const void* a, const void* b) -> int 
+				// 	{
+				// 		return *((int*)a) - *((int*)b);
+				// 	}
+				// );
+
 				int i, j;
 				bool swapped;
 				for (i = 0; i < 10 - 1; i++)
@@ -664,58 +664,6 @@ void task_pressure_sensor_read(void *params)
 				pressure += (average_value - pressure) * k;
 
 				pressure_sum = 0;
-
-				/** TODO: Это нужно перенести в отдельный поток управления насосом!!! */
-				/* В первом режиме включаем минимальную скорость и запускаем ПИД */
-				if (regime_state == Regime::REGIME1)
-				{
-					if (pump.get_state() == PumpStates::OFF)
-					{
-						pump.set_speed(10);
-						vTaskDelay(1000 / 16);
-						pump.start();
-					}
-
-					PIDor(pressure);
-				}
-				/* Во втором режиме просто шарашим на полную */
-				else if (regime_state == Regime::REGIME2)
-				{
-					if (is_first_regime2_start)
-					{
-						// pump.set_speed(200 / 0.8);
-						pump.set_speed(100);
-
-						_delay_ms(20);
-
-						if (pump.get_state() == PumpStates::OFF)
-						{
-							pump.start();
-						}
-
-						is_first_regime2_start = false;
-					}
-				}
-				/* ANTIBALLBUSTING */
-				else if (regime_state == Regime::REGIME_REMOVE_KEBAB) {
-					pump.set_speed(PUMP_MAX_SPEED);
-
-					if (pump.get_state() == PumpStates::OFF) {
-						pump.start();
-					}
-				}
-				/* Ну тут всё понятно */
-				else if (regime_state == Regime::STOPED)
-				{
-					if (pump.get_state() == PumpStates::ON)
-					{
-						pump.stop();
-						pump.set_speed(10);
-						// vTaskDelay(1000 / 16);
-					}
-
-					is_first_regime2_start = true;
-				}
 			}
 
 			/**
@@ -731,12 +679,65 @@ void task_pressure_sensor_read(void *params)
 
 void task_pump_control(void *params)
 {
+	bool is_first_regime2_start = true;
+
 	for (;;)
 	{
 		if (is_system_blocked)
 		{
 			vTaskDelay(1000);
 			continue;
+		}
+
+		/* В первом режиме включаем минимальную скорость и запускаем ПИД */
+		if (regime_state == Regime::REGIME1)
+		{
+			if (pump.get_state() == PumpStates::OFF)
+			{
+				pump.set_speed(10);
+				vTaskDelay(1000 / 16);
+				pump.start();
+			}
+
+			PIDor(pressure);
+		}
+		/* Во втором режиме просто шарашим на полную */
+		else if (regime_state == Regime::REGIME2)
+		{
+			if (is_first_regime2_start)
+			{
+				// pump.set_speed(200 / 0.8);
+				pump.set_speed(100);
+
+				_delay_ms(20);
+
+				if (pump.get_state() == PumpStates::OFF)
+				{
+					pump.start();
+				}
+
+				is_first_regime2_start = false;
+			}
+		}
+		/* ANTIBALLBUSTING */
+		else if (regime_state == Regime::REGIME_REMOVE_KEBAB) {
+			pump.set_speed(PUMP_MAX_SPEED);
+
+			if (pump.get_state() == PumpStates::OFF) {
+				pump.start();
+			}
+		}
+		/* Ну тут всё понятно */
+		else if (regime_state == Regime::STOPED)
+		{
+			if (pump.get_state() == PumpStates::ON)
+			{
+				pump.stop();
+				pump.set_speed(10);
+				// vTaskDelay(1000 / 16);
+			}
+
+			is_first_regime2_start = true;
 		}
 
 		pump.process();
@@ -762,9 +763,6 @@ void task_CLI(void *params)
 			char sym[64];
 			int size = Serial.readBytesUntil('\n', sym, 100);
 			sym[size] = '\0';
-
-			// Serial.println("Receive message: ");
-			// Serial.print(sym);
 
 			parse_message(String(sym));
 
