@@ -25,16 +25,12 @@ void pump_start_handler();
 void pump_stop_handler();
 void set_pump_rotation_speed_handler(const String &str);
 void set_pump_rotate_direction(const String &str);
-void set_P(const String &str);
-void set_I(const String &str);
-void set_D(const String &str);
 void set_tv(const String &str);
 void start_handler(const String& str);
 void pause_handler(const String& str);
 void stop_handler(const String& str);
 void regime_handler(const String& str);
 
-void PIDor(const float &value);
 void check_button(const uint8_t &button_number);
 
 void regime1_handler(const uint8_t &binState);
@@ -117,9 +113,6 @@ static const Command command_list[] = {
 	Command("regime", regime_handler),
 	Command("set_speed", set_pump_rotation_speed_handler),
 	Command("set_rotate_direction", set_pump_rotate_direction),
-	Command("set_P", set_P),
-	Command("set_I", set_I),
-	Command("set_D", set_D),
 	Command("set_tv", set_tv)
 };
 
@@ -236,39 +229,6 @@ void set_pump_rotate_direction(const String &str)
 	pump.set_rotate_direction((buff[0] == '0') ? RotateDirections::COUNTERCLOCKWISE : RotateDirections::CLOCKWISE);
 }
 
-void set_P(const String &str)
-{
-	int space_idx = str.indexOf(' ');
-
-	String P = str.substring(space_idx + 1, str.length() - 1);
-	pid.Kp = P.toFloat();
-
-	// Serial.print("Set kP value to ");
-	// Serial.print(P);
-}
-
-void set_I(const String &str)
-{
-	int space_idx = str.indexOf(' ');
-
-	String I = str.substring(space_idx + 1, str.length() - 1);
-	pid.Ki = I.toFloat();
-
-	// Serial.print("Set ki value to ");
-	// Serial.println(I);
-}
-
-void set_D(const String &str)
-{
-	int space_idx = str.indexOf(' ');
-
-	String D = str.substring(space_idx + 1, str.length() - 1);
-	pid.Kd = D.toFloat();
-
-	// Serial.print("Set kd value to ");
-	// Serial.println(D);
-}
-
 void set_tv(const String &str)
 {
 	int space_idx = str.indexOf(' ');
@@ -311,12 +271,6 @@ void regime_handler(const String& message) {
 	if (isDigit(input_regime)) {
 		regime_state = static_cast<Regime>(input_regime - '0');
 	}
-}
-
-void PIDor(const float &value)
-{
-	pid.input = value;
-	pump.set_speed(pid.getResultTimer());
 }
 
 void check_button(const uint8_t &button_number)
