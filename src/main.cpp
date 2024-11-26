@@ -24,6 +24,8 @@ void parse_message(const String &str);
 void pump_start_handler();
 void pump_stop_handler();
 void set_pump_rotation_speed_handler(const String &str);
+void tare_pressure_handler(const String& str);
+void set_perfussion_speed_ratio_handler(const String& str);
 void set_pump_rotate_direction(const String &str);
 void set_tv(const String &str);
 void start_handler(const String& str);
@@ -31,6 +33,7 @@ void pause_handler(const String& str);
 void stop_handler(const String& str);
 void regime_handler(const String& str);
 
+void set_PID(const float &value);
 void check_button(const uint8_t &button_number);
 
 void regime1_handler(const uint8_t &binState);
@@ -49,6 +52,7 @@ float pressure = 1;
 
 float pressure_shift = 0;
 float resistance = 0;
+float perfussion_ratio = 0.6;
 
 bool is_data_transmitted = false;
 
@@ -112,7 +116,8 @@ static const Command command_list[] = {
 	Command("stop", stop_handler),
 	Command("regime", regime_handler),
 	Command("set_speed", set_pump_rotation_speed_handler),
-	Command("set_rotate_direction", set_pump_rotate_direction),
+	Command("tare_pressure", tare_pressure_handler),
+	Command("set_perfussion_speed_ratio", set_perfussion_speed_ratio_handler),
 	Command("set_tv", set_tv)
 };
 
@@ -181,7 +186,7 @@ void set_pump_rotation_speed_handler(const String &str)
 
 	if (space_idx > str.length())
 	{
-		Serial.println("ERROR: Space index are more than string size!");
+		// Serial.println("ERROR: Space index are more than string size!");
 		return;
 	}
 
@@ -196,7 +201,7 @@ void set_pump_rotation_speed_handler(const String &str)
 
 	if (space_idx >= LF_idx)
 	{
-		Serial.println("ERROR: space index more than LF index!");
+		// Serial.println("ERROR: space index more than LF index!");
 		return;
 	}
 
@@ -206,10 +211,42 @@ void set_pump_rotation_speed_handler(const String &str)
 
 	/** TODO: Add command reply to Qt program */
 
-	Serial.print("DEBUG: Set speed value to ");
-	Serial.println(pump_rmp);
+	// Serial.print("DEBUG: Set speed value to ");
+	// Serial.println(pump_rmp);
 
 	pump.set_speed(pump_rmp);
+}
+
+void tare_pressure_handler(const String& str) {
+	pressure_shift = pressure;
+}
+
+void set_perfussion_speed_ratio_handler(const String& str) {
+	int space_idx = str.indexOf(' ');
+
+	if (space_idx > str.length())
+	{
+		// Serial.println("ERROR: Space index are more than string size!");
+		return;
+	}
+
+	int LF_idx = str.indexOf('\n');
+
+	if (LF_idx > str.length())
+	{
+		// Serial.println("ERROR: LF index are more than string size!");
+		LF_idx = str.length() - 1;
+		// return;
+	}
+
+	if (space_idx >= LF_idx)
+	{
+		// Serial.println("ERROR: space index more than LF index!");
+		return;
+	}
+
+	String float_str = str.substring(space_idx + 1, LF_idx);
+	perfussion_ratio = float_str.toFloat();
 }
 
 void set_pump_rotate_direction(const String &str)
@@ -219,13 +256,13 @@ void set_pump_rotate_direction(const String &str)
 
 	strtok_index = strtok(str.c_str(), " ");
 	strcpy(buff, strtok_index);
-	Serial.print(buff);
+	// Serial.print(buff);
 
 	strtok_index = strtok(NULL, " ");
 	strcpy(buff, strtok_index);
-	Serial.print(buff);
+	// Serial.print(buff);
 
-	Serial.println("Set the rotate direction to clockwise");
+	// Serial.println("Set the rotate direction to clockwise");
 	pump.set_rotate_direction((buff[0] == '0') ? RotateDirections::COUNTERCLOCKWISE : RotateDirections::CLOCKWISE);
 }
 
@@ -273,6 +310,12 @@ void regime_handler(const String& message) {
 	}
 }
 
+void set_PID(const float &value)
+{
+	pid.input = value;
+	pump.set_speed(pid.getResultTimer());
+}
+
 void check_button(const uint8_t &button_number)
 {
 	bool btnState = digitalRead(button_number);
@@ -316,8 +359,8 @@ void regime1_handler(const uint8_t &btnState)
 			Timer5.stop();
 		}
 
-		Serial.print("INFO: Current regime after first button clicked is ");
-		Serial.println(regime_state);
+		// Serial.print("INFO: Current regime after first button clicked is ");
+		// Serial.println(regime_state);
 	}
 	if (btnState && regime1_flag)
 	{
@@ -341,8 +384,8 @@ void regime2_handler(const uint8_t &btnState)
 			Timer5.stop();
 		}
 
-		Serial.print("INFO: Current regime after second button clicked is ");
-		Serial.println(regime_state);
+		// Serial.print("INFO: Current regime after second button clicked is ");
+		// Serial.println(regime_state);
 	}
 	if (btnState && regime2_flag)
 	{
@@ -357,8 +400,8 @@ void calibration_handler(const uint8_t &btnState)
 		calibration_flag = true;
 		pressure_shift = pressure;
 
-		Serial.print("INFO: Calibrated value is ");
-		Serial.println(pressure_shift);
+		// Serial.print("INFO: Calibrated value is ");
+		// Serial.println(pressure_shift);
 	}
 	if (btnState && calibration_flag)
 	{
@@ -374,10 +417,10 @@ void block_handler(const uint8_t &btnState)
 
 		is_blocked = !is_blocked;
 
-		if (is_blocked)
-			Serial.println("Block is activated");
-		else
-			Serial.println("Block is disabled");
+		// if (is_blocked)
+			// Serial.println("Block is activated");
+		// else
+			// Serial.println("Block is disabled");
 	}
 	if (btnState && block_flag)
 	{
@@ -394,12 +437,12 @@ void kidney_handler(const uint8_t &btnState)
 		if (kidney_selector == KidneyState::LEFT_KIDNEY)
 		{
 			kidney_selector = KidneyState::RIGTH_KIDNEY;
-			Serial.println("Right kidney selected");
+			// Serial.println("Right kidney selected");
 		}
 		else if (kidney_selector == KidneyState::RIGTH_KIDNEY)
 		{
 			kidney_selector = KidneyState::LEFT_KIDNEY;
-			Serial.println("Left kidney selected");
+			// Serial.println("Left kidney selected");
 		}
 	}
 	if (btnState && kidney_flag)
@@ -411,7 +454,7 @@ void kidney_handler(const uint8_t &btnState)
 ISR(TIMER5_A)
 {
 	/* Write flow */
-	float flow = pump.get_speed() * 0.6;
+	float flow = pump.get_speed() * perfussion_ratio;
 	uint8_t* magic = ((uint8_t*)(&flow));
 	uint8_t* p_writer = to_send;
 
@@ -461,6 +504,7 @@ ISR(TIMER5_A)
 
 	++time;
 
+	/** TODO: Add messages to queue and send it to COM port outside of the interrupt */
 	Serial.write(to_send, TO_SEND_ARRAY_SIZE);
 }
 
@@ -495,7 +539,7 @@ ISR(TIMER3_A)
 		bubble_remover.stop(regime_state);
 		remove_bubble_secs = 0;
 		regime_state = Regime::REGIME1;
-		Serial.println("Remove kebab complete");
+		// Serial.println("Remove kebab complete");
 	}
 
 }
@@ -507,11 +551,11 @@ void task_pressure_sensor_read(void *params)
 	ads.setGain(GAIN_SIXTEEN);
 	if (!ads.begin())
 	{
-		Serial.println("Failed to initialize ADS.");
+		// Serial.println("Failed to initialize ADS.");
 		while (1);
 	}
 
-	Serial.println("ADC initialized successfully");
+	// Serial.println("ADC initialized successfully");
 
 	// Start continuous conversions.
 	ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, /*continuous=*/true);
@@ -521,6 +565,8 @@ void task_pressure_sensor_read(void *params)
 	pid.setDirection(NORMAL); // направление регулирования (NORMAL/REVERSE). ПО УМОЛЧАНИЮ СТОИТ NORMAL
 	pid.setLimits(1, 100);	  // пределы (ставим для 8 битного ШИМ). ПО УМОЛЧАНИЮ СТОЯТ 0 И 255
 	pid.setpoint = 29;
+
+	bool is_first_regime2_start = true;
 
 	uint8_t counter = 0;
 	float pressure_sum = 0;
@@ -616,6 +662,54 @@ void task_pressure_sensor_read(void *params)
 				pressure += (average_value - pressure) * k;
 
 				pressure_sum = 0;
+
+						/* В первом режиме включаем минимальную скорость и запускаем ПИД */
+				if (regime_state == Regime::REGIME1)
+				{
+					if (pump.get_state() == PumpStates::OFF)
+					{
+						pump.set_speed(10);
+						vTaskDelay(1000 / 16);
+						pump.start();
+					}
+
+					set_PID(pressure);
+				}
+				/* Во втором режиме просто шарашим на полную */
+				else if (regime_state == Regime::REGIME2)
+				{
+					if (is_first_regime2_start)
+					{
+						pump.set_speed(100);
+
+						_delay_ms(20);
+
+						if (pump.get_state() == PumpStates::OFF)
+						{
+							pump.start();
+						}
+
+						is_first_regime2_start = false;
+					}
+				}
+				else if (regime_state == Regime::REGIME_REMOVE_BUBBLE) {
+					pump.set_speed(PUMP_MAX_SPEED);
+
+					if (pump.get_state() == PumpStates::OFF) {
+						pump.start();
+					}
+				}
+				else if (regime_state == Regime::STOPED)
+				{
+					if (pump.get_state() == PumpStates::ON)
+					{
+						pump.stop();
+						pump.set_speed(10);
+						// vTaskDelay(1000 / 16);
+					}
+
+					is_first_regime2_start = true;
+				}
 			}
 
 			/**
@@ -631,65 +725,12 @@ void task_pressure_sensor_read(void *params)
 
 void task_pump_control(void *params)
 {
-	bool is_first_regime2_start = true;
-
 	for (;;)
 	{
 		if (is_system_blocked)
 		{
 			vTaskDelay(1000);
 			continue;
-		}
-
-		/* В первом режиме включаем минимальную скорость и запускаем ПИД */
-		if (regime_state == Regime::REGIME1)
-		{
-			if (pump.get_state() == PumpStates::OFF)
-			{
-				pump.set_speed(10);
-				vTaskDelay(1000 / 16);
-				pump.start();
-			}
-
-			PIDor(pressure);
-		}
-		/* Во втором режиме просто шарашим на полную */
-		else if (regime_state == Regime::REGIME2)
-		{
-			if (is_first_regime2_start)
-			{
-				// pump.set_speed(200 / 0.8);
-				pump.set_speed(100);
-
-				_delay_ms(20);
-
-				if (pump.get_state() == PumpStates::OFF)
-				{
-					pump.start();
-				}
-
-				is_first_regime2_start = false;
-			}
-		}
-		/* ANTIBALLBUSTING */
-		else if (regime_state == Regime::REGIME_REMOVE_KEBAB) {
-			pump.set_speed(PUMP_MAX_SPEED);
-
-			if (pump.get_state() == PumpStates::OFF) {
-				pump.start();
-			}
-		}
-		/* Ну тут всё понятно */
-		else if (regime_state == Regime::STOPED)
-		{
-			if (pump.get_state() == PumpStates::ON)
-			{
-				pump.stop();
-				pump.set_speed(10);
-				// vTaskDelay(1000 / 16);
-			}
-
-			is_first_regime2_start = true;
 		}
 
 		pump.process();
@@ -935,12 +976,12 @@ void task_temperature_sensor(void *params)
 		if (sensor1.readTemp())
 			temperature1 = sensor1.getTemp();
 		else
-			Serial.println("error");
+			// Serial.println("error");
 
 		if (sensor2.readTemp())
 			temperature2 = sensor2.getTemp();
 		else
-			Serial.println("error");
+			// Serial.println("error");
 
 		vTaskDelay(1000 / 16);
 	}
@@ -964,7 +1005,7 @@ void task_bubble_remover(void* params) {
 
 		/* Проверяем состояние кнопки (датчика пузырьков) */
 		if (bubble_remover.is_bubble()) {
-			Serial.println("Bubble emulated");
+			// Serial.println("Bubble emulated");
 			bubble_remover.start(regime_state);
 		}
 
