@@ -60,6 +60,22 @@ bool is_data_transmitted = false;
 const uint8_t alert_size = 9;
 bool alert[alert_size] = {1, 0, 0, 0, 0, 0, 0, 0, 0};
 
+struct PeripheralStatus {
+	bool is_pump_online = false;
+	bool is_pressure_sensor_online = false;
+	bool is_temp1_sensor_online = false;
+	bool is_temp2_sensor_online = false;
+
+	uint8_t pack_to_byte() {
+		return (is_pump_online & 0b1) |
+			   ((is_pressure_sensor_online & 0b1) << 1) |
+			   ((is_temp1_sensor_online &0b1) << 2) |
+			   ((is_temp2_sensor_online &0b1) << 3);
+	}
+};
+
+PeripheralStatus peripheral_status;
+
 KidneyState kidney_selector = KidneyState::LEFT_KIDNEY;
 Regime regime_state = Regime::STOPED;
 
@@ -107,8 +123,12 @@ bool is_error_timer_start = false;
  * UPDATE:
  * We can delete resistance from transmission
  * 16 + 3 + 1 + 1 = 21 + \n = 22
+ * 
+ * UPDATE:
+ * Add peripheral status byte
+ * 16 + 3 + 1 + 1 + 1 = 22 + \n = 23
  */
-const uint8_t TO_SEND_ARRAY_SIZE = 22;
+const uint8_t TO_SEND_ARRAY_SIZE = 23;
 uint8_t to_send[TO_SEND_ARRAY_SIZE];
 
 static const Command command_list[] = {
@@ -504,6 +524,9 @@ ISR(TIMER5_A)
 	}
 	*(p_writer++) = alert_byte;
 
+	uint8_t peripheral_status_byte = peripheral_status.pack_to_byte();
+	*(p_writer++) = peripheral_status_byte;
+
 	++time;
 
 	/** TODO: Add messages to queue and send it to COM port outside of the interrupt */
@@ -554,8 +577,12 @@ void task_pressure_sensor_read(void *params)
 	if (!ads.begin())
 	{
 		// Serial.println("Failed to initialize ADS.");
-		while (1);
+		// while (1);
+		peripheral_status.is_pressure_sensor_online = false;
 	}
+	else 
+		peripheral_status.is_pressure_sensor_online = true;
+
 
 	// Serial.println("ADC initialized successfully");
 
@@ -734,6 +761,8 @@ void task_pump_control(void *params)
 			vTaskDelay(1000);
 			continue;
 		}
+
+		peripheral_status.is_pump_online = pump.check_timeout();
 
 		pump.process();
 		vTaskDelay(3);
@@ -971,6 +1000,10 @@ void task_temperature_sensor(void *params)
 			vTaskDelay(1000);
 			continue;
 		}
+
+		/* Check that temperature sensors are available */
+		peripheral_status.is_temp1_sensor_online = sensor1.online();
+		peripheral_status.is_temp2_sensor_online = sensor2.online();
 
 		sensor1.requestTemp();
 		sensor2.requestTemp();

@@ -28,6 +28,7 @@ public:
     float get_speed();
     void set_rotate_direction(const RotateDirections &direction);
     PumpStates get_state();
+    bool check_timeout();
 
     void process();
 

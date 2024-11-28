@@ -118,6 +118,10 @@ PumpStates Pump::get_state()
     return pump_state;
 }
 
+bool Pump::check_timeout() {
+    return master.getTimeOutState();
+}
+
 void Pump::process()
 {
     switch (u8state)
