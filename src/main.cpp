@@ -53,6 +53,7 @@ float pressure = 1;
 float pressure_shift = 0;
 float resistance = 0;
 float perfussion_ratio = 0.6;
+float pump_flushing_rpm = 100;
 
 bool is_data_transmitted = false;
 
@@ -207,14 +208,15 @@ void set_pump_rotation_speed_handler(const String &str)
 
 	String float_str = str.substring(space_idx + 1, LF_idx);
 
-	float pump_rmp = float_str.toFloat();
+	float pump_rpm = float_str.toFloat();
 
 	/** TODO: Add command reply to Qt program */
 
 	// Serial.print("DEBUG: Set speed value to ");
 	// Serial.println(pump_rmp);
 
-	pump.set_speed(pump_rmp);
+	// pump.set_speed(pump_rmp);
+	pump_flushing_rpm = pump_rpm;
 }
 
 void tare_pressure_handler(const String& str) {
@@ -680,7 +682,7 @@ void task_pressure_sensor_read(void *params)
 				{
 					if (is_first_regime2_start)
 					{
-						pump.set_speed(100);
+						pump.set_speed(pump_flushing_rpm);
 
 						_delay_ms(20);
 
