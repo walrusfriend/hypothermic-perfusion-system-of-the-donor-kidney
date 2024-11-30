@@ -595,8 +595,6 @@ void task_pressure_sensor_read(void *params)
 	pid.setLimits(1, 100);	  // пределы (ставим для 8 битного ШИМ). ПО УМОЛЧАНИЮ СТОЯТ 0 И 255
 	pid.setpoint = 29;
 
-	bool is_first_regime2_start = true;
-
 	uint8_t counter = 0;
 	float pressure_sum = 0;
 	float average_sistal[10];
@@ -692,7 +690,7 @@ void task_pressure_sensor_read(void *params)
 
 				pressure_sum = 0;
 
-						/* В первом режиме включаем минимальную скорость и запускаем ПИД */
+				/* В первом режиме включаем минимальную скорость и запускаем ПИД */
 				if (regime_state == Regime::REGIME1)
 				{
 					if (pump.get_state() == PumpStates::OFF)
@@ -707,18 +705,13 @@ void task_pressure_sensor_read(void *params)
 				/* Во втором режиме просто шарашим на полную */
 				else if (regime_state == Regime::REGIME2)
 				{
-					if (is_first_regime2_start)
+					pump.set_speed(pump_flushing_rpm);
+
+					_delay_ms(20);
+
+					if (pump.get_state() == PumpStates::OFF)
 					{
-						pump.set_speed(pump_flushing_rpm);
-
-						_delay_ms(20);
-
-						if (pump.get_state() == PumpStates::OFF)
-						{
-							pump.start();
-						}
-
-						is_first_regime2_start = false;
+						pump.start();
 					}
 				}
 				else if (regime_state == Regime::REGIME_REMOVE_BUBBLE) {
@@ -736,8 +729,6 @@ void task_pressure_sensor_read(void *params)
 						pump.set_speed(10);
 						// vTaskDelay(1000 / 16);
 					}
-
-					is_first_regime2_start = true;
 				}
 			}
 
