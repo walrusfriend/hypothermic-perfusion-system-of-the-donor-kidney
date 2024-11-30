@@ -765,12 +765,6 @@ void task_CLI(void *params)
 
 	for (;;)
 	{
-		if (is_system_blocked)
-		{
-			vTaskDelay(1000);
-			continue;
-		}
-
 		if (Serial.available() >= 1)
 		{
 			is_data_transmitted = true;
