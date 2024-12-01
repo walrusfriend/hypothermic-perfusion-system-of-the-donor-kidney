@@ -7,6 +7,7 @@
 #include "custom_time.h"
 #include "bubble_remover.h"
 #include "CLI.h"
+#include "BaseParams/Pressure.h"
 
 #include "GyverPID.h"
 #include "GyverTimers.h"
@@ -21,8 +22,6 @@
  */
 
 void parse_message(const String &str);
-void pump_start_handler();
-void pump_stop_handler();
 void set_pump_rotation_speed_handler(const String &str);
 void tare_pressure_handler(const String& str);
 void set_perfussion_speed_ratio_handler(const String& str);
@@ -47,10 +46,8 @@ const uint32_t PRESSURE_SENSOR_TICK_RATE = 100;
 GyverPID pid(0.2, 0.2, 0.2, PRESSURE_SENSOR_TICK_RATE);
 Pump pump;
 
-uint16_t target_pressure_value = 29;
-float pressure = 1;
+Pressure pressure;
 
-float pressure_shift = 0;
 float resistance = 0;
 float perfussion_ratio = 0.6;
 float pump_flushing_rpm = 100;
@@ -92,7 +89,7 @@ bool kidney_flag = false;
 float temperature1 = 0;
 float temperature2 = 0;
 
-bool is_pressure_stabilized = false;
+// bool is_pressure_stabilized = false;
 
 Time time {0, 0, 0};
 
@@ -103,6 +100,10 @@ uint8_t remove_bubble_secs = 0;
 
 bool is_system_blocked = false;
 bool is_error_timer_start = false;
+
+
+uint8_t TEMP_LOW_LIMIT = 4;
+uint8_t TEMP_HIGH_LIMIT = 10;
 
 /**
  * float -> uin32_t -> 4 bytes * 4 -> 16 bytes for all float values
@@ -191,16 +192,6 @@ void parse_message(const String &message)
 	Serial.println("ERROR: Unknown command!");
 }
 
-void pump_start_handler()
-{
-	pump.start();
-}
-
-void pump_stop_handler()
-{
-	pump.stop();
-}
-
 void set_pump_rotation_speed_handler(const String &str)
 {
 	int space_idx = str.indexOf(' ');
@@ -240,7 +231,9 @@ void set_pump_rotation_speed_handler(const String &str)
 }
 
 void tare_pressure_handler(const String& str) {
+	pressure.set_tare(pressure.get_value());
 	pressure_shift = pressure;
+	// pressure.tare();
 }
 
 void set_perfussion_speed_ratio_handler(const String& str) {
@@ -295,6 +288,8 @@ void set_tv(const String &str)
 	String target_value = str.substring(space_idx + 1, str.length() - 1);
 	target_pressure_value = target_value.toInt();
 	pid.setpoint = target_pressure_value;
+
+	// pressure.set_target();
 
 	// Serial.print("Set kd value to ");
 	// Serial.println(target_value);
@@ -373,6 +368,7 @@ void regime1_handler(const uint8_t &btnState)
 			Timer5.restart();
 			time.reset();
 
+			/** TODO: Need to understand how it works and why it placed here */
 			is_pressure_stabilized = false;
 		}
 		else if (regime_state == Regime::REGIME1)
@@ -421,6 +417,8 @@ void calibration_handler(const uint8_t &btnState)
 	{
 		calibration_flag = true;
 		pressure_shift = pressure;
+
+		// pressure.set_target();
 
 		// Serial.print("INFO: Calibrated value is ");
 		// Serial.println(pressure_shift);
@@ -593,7 +591,7 @@ void task_pressure_sensor_read(void *params)
 
 	pid.setDirection(NORMAL); // направление регулирования (NORMAL/REVERSE). ПО УМОЛЧАНИЮ СТОИТ NORMAL
 	pid.setLimits(1, 100);	  // пределы (ставим для 8 битного ШИМ). ПО УМОЛЧАНИЮ СТОЯТ 0 И 255
-	pid.setpoint = 29;
+	pid.setpoint = pressure.get_target();
 
 	uint8_t counter = 0;
 	float pressure_sum = 0;
@@ -643,14 +641,6 @@ void task_pressure_sensor_read(void *params)
 				 * Сортировка позырьком, почему так? 
 				 * TODO: Применить нормальную сортировку
 				 */
-
-				/** TODO: Check new sort function */
-				// qsort(average_sistal, counter, sizeof(average_sistal[0]), 
-				// 	[](const void* a, const void* b) -> int 
-				// 	{
-				// 		return *((int*)a) - *((int*)b);
-				// 	}
-				// );
 
 				int i, j;
 				bool swapped;
@@ -812,13 +802,15 @@ void task_process_buttons(void *params)
 
 void task_handle_error(void *params)
 {
-	const uint8_t PRESSURE_LOW_LIMIT = 28;
-	const uint8_t PRESSURE_OPTIMAL_HIGH_LIMIT = 30;
-	const uint8_t PRESSURE_HIGH_LIMIT = 40;
-	const uint8_t PRESSURE_STABLE_VALUE = 29;
-
-	const uint8_t TEMP_LOW_LIMIT = 4;
-	const uint8_t TEMP_HIGH_LIMIT = 10;
+/** 
+ * TODO: Это настолько больно, что я буду писать по-русски
+ * Нужно обязательно переделать этот срам, это невыносимо больно
+ * Этот обработчик ошибок заставляет меня страдать одним своим существованием
+ * Это страшная пытка
+ * Нужно срочно всё это переделать
+ * 
+ * Тут прекрасно всё - и лапша из кода, и ответсвенность других модулей тут перенимается
+ */
 
 	bool is_pressure_high_beat = false;
 
@@ -839,7 +831,7 @@ void task_handle_error(void *params)
 		{
 			if (!is_pressure_stabilized)
 			{
-				if (pressure >= PRESSURE_STABLE_VALUE)
+				if (pressure >= target_pressure_value)
 				{
 					is_pressure_stabilized = true;
 				}
