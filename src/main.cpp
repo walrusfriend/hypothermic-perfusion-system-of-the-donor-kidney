@@ -24,7 +24,7 @@
 void parse_message(const String &str);
 void set_pump_rotation_speed_handler(const String &str);
 void tare_pressure_handler(const String& str);
-void set_perfussion_speed_ratio_handler(const String& str);
+void set_perfusion_speed_ratio_handler(const String& str);
 void set_pump_rotate_direction(const String &str);
 void set_tv(const String &str);
 void start_handler(const String& str);
@@ -49,7 +49,7 @@ Pump pump;
 Pressure pressure;
 
 float resistance = 0;
-float perfussion_ratio = 0.6;
+float perfusion_ratio = 0.6;
 float pump_flushing_rpm = 100;
 
 bool is_data_transmitted = false;
@@ -141,7 +141,7 @@ static const Command command_list[] = {
 	Command("regime", regime_handler),
 	Command("set_speed", set_pump_rotation_speed_handler),
 	Command("tare_pressure", tare_pressure_handler),
-	Command("set_perfussion_speed_ratio", set_perfussion_speed_ratio_handler),
+	Command("set_perfusion_speed_ratio", set_perfusion_speed_ratio_handler),
 	Command("set_tv", set_tv)
 };
 
@@ -236,7 +236,7 @@ void tare_pressure_handler(const String& str) {
 	pressure.set_tare(pressure.get_value());
 }
 
-void set_perfussion_speed_ratio_handler(const String& str) {
+void set_perfusion_speed_ratio_handler(const String& str) {
 	int space_idx = str.indexOf(' ');
 
 	if (space_idx > str.length())
@@ -261,7 +261,7 @@ void set_perfussion_speed_ratio_handler(const String& str) {
 	}
 
 	String float_str = str.substring(space_idx + 1, LF_idx);
-	perfussion_ratio = float_str.toFloat();
+	perfusion_ratio = float_str.toFloat();
 }
 
 void set_pump_rotate_direction(const String &str)
@@ -457,10 +457,10 @@ void kidney_handler(const uint8_t &btnState)
 
 		if (kidney_selector == KidneyState::LEFT_KIDNEY)
 		{
-			kidney_selector = KidneyState::RIGTH_KIDNEY;
+			kidney_selector = KidneyState::RIGHT_KIDNEY;
 			// Serial.println("Right kidney selected");
 		}
-		else if (kidney_selector == KidneyState::RIGTH_KIDNEY)
+		else if (kidney_selector == KidneyState::RIGHT_KIDNEY)
 		{
 			kidney_selector = KidneyState::LEFT_KIDNEY;
 			// Serial.println("Left kidney selected");
@@ -475,7 +475,7 @@ void kidney_handler(const uint8_t &btnState)
 ISR(TIMER5_A)
 {
 	/* Write flow */
-	float flow = pump.get_speed() * perfussion_ratio;
+	float flow = pump.get_speed() * perfusion_ratio;
 	uint8_t* magic = ((uint8_t*)(&flow));
 	uint8_t* p_writer = to_send;
 
@@ -613,7 +613,7 @@ void task_pressure_sensor_read(void *params)
 		 * TODO: Загнать количество точек усреднения в константу или переменную,
 		 * если хотим управлять ей через СОМ порт
 		 * 
-		 * TODO: Можно сделать плавующую среднюю по последним N значениям
+		 * TODO: Можно сделать плавающую среднюю по последним N значениям
 		 */
 
 		if (counter < 10) {
@@ -639,7 +639,7 @@ void task_pressure_sensor_read(void *params)
 				// Serial.println(pressure);
 
 				/**
-				 * Сортировка позырьком, почему так? 
+				 * Сортировка пузырьком, почему так? 
 				 * TODO: Применить нормальную сортировку
 				 */
 
@@ -811,7 +811,7 @@ void task_handle_error(void *params)
  * Это страшная пытка
  * Нужно срочно всё это переделать
  * 
- * Тут прекрасно всё - и лапша из кода, и ответсвенность других модулей тут перенимается
+ * Тут прекрасно всё - и лапша из кода, и ответственность других модулей тут перенимается
  */
 
 	bool is_pressure_high_beat = false;
@@ -951,17 +951,17 @@ void task_handle_error(void *params)
 				alert[AlertType::TEMP2_HIGH] = false;
 			}
 
-			bool is_error_occured = false;
+			bool is_error_occurred = false;
 			for (uint8_t i = 1; i < alert_size; ++i)
 			{
 				if (alert[i] == true)
 				{
-					is_error_occured = true;
+					is_error_occurred = true;
 					break;
 				}
 			}
 
-			alert[AlertType::NONE] = !is_error_occured;
+			alert[AlertType::NONE] = !is_error_occurred;
 		}
 
 		vTaskDelay(1000 / 16);
@@ -1025,7 +1025,7 @@ void task_bubble_remover(void* params) {
 		}
 
 		/* Ставим минимальное ожидание в треде, чтобы не пропустить пузырёк */
-		/* Но пока поставим не сильно много, чтобы не было дребезка кнопки при эмуляции */
+		/* Но пока поставим не сильно много, чтобы не было дребезга кнопки при эмуляции */
 		// vTaskDelay(1);
 		vTaskDelay(200 / 16);
 	}

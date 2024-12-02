@@ -32,7 +32,7 @@ enum Regime
 enum KidneyState
 {
 	LEFT_KIDNEY,
-	RIGTH_KIDNEY
+	RIGHT_KIDNEY
 };
 
 enum AlertType
