@@ -78,8 +78,10 @@ Regime regime_state = Regime::STOPED;
 
 BubbleRemover bubble_remover;
 
+/** Used to block input buttons */
 bool is_blocked = false;
 
+/**  Used to prevent buttons bouncing */
 bool regime1_flag = false;
 bool regime2_flag = false;
 bool calibration_flag = false;
@@ -88,8 +90,6 @@ bool kidney_flag = false;
 
 float temperature1 = 0;
 float temperature2 = 0;
-
-// bool is_pressure_stabilized = false;
 
 Time time {0, 0, 0};
 
@@ -104,6 +104,8 @@ bool is_error_timer_start = false;
 
 uint8_t TEMP_LOW_LIMIT = 4;
 uint8_t TEMP_HIGH_LIMIT = 10;
+
+bool is_system_stabilized = false;
 
 /**
  * float -> uin32_t -> 4 bytes * 4 -> 16 bytes for all float values
@@ -232,8 +234,6 @@ void set_pump_rotation_speed_handler(const String &str)
 
 void tare_pressure_handler(const String& str) {
 	pressure.set_tare(pressure.get_value());
-	pressure_shift = pressure;
-	// pressure.tare();
 }
 
 void set_perfussion_speed_ratio_handler(const String& str) {
@@ -286,13 +286,8 @@ void set_tv(const String &str)
 	int space_idx = str.indexOf(' ');
 
 	String target_value = str.substring(space_idx + 1, str.length() - 1);
-	target_pressure_value = target_value.toInt();
-	pid.setpoint = target_pressure_value;
-
-	// pressure.set_target();
-
-	// Serial.print("Set kd value to ");
-	// Serial.println(target_value);
+	pressure.set_target(target_value.toInt());
+	pid.setpoint = pressure.get_target();
 }
 
 
@@ -368,8 +363,16 @@ void regime1_handler(const uint8_t &btnState)
 			Timer5.restart();
 			time.reset();
 
-			/** TODO: Need to understand how it works and why it placed here */
-			is_pressure_stabilized = false;
+			/** 
+			 * Эта переменная показывает, что система вышла на рабочий режим 
+			 * В данном случае она сбрасывается, потому что стенд переходит
+			 * из режима просто в рабочий режим
+			 */
+
+			/** 
+			 * TODO: Rename variable
+			*/
+			is_system_stabilized = false;
 		}
 		else if (regime_state == Regime::REGIME1)
 		{
@@ -416,9 +419,7 @@ void calibration_handler(const uint8_t &btnState)
 	if (!btnState && !calibration_flag)
 	{
 		calibration_flag = true;
-		pressure_shift = pressure;
-
-		// pressure.set_target();
+		pressure.set_tare(pressure.get_value());
 
 		// Serial.print("INFO: Calibrated value is ");
 		// Serial.println(pressure_shift);
@@ -483,7 +484,7 @@ ISR(TIMER5_A)
 	}
 
 	/* Write pressure */
-	magic = ((uint8_t*)(&pressure));
+	magic = ((uint8_t*)(&pressure.get_value()));
 
 	for(uint8_t i = 0; i < 4; i++) {
 		*(p_writer++) = magic[i];
@@ -620,7 +621,7 @@ void task_pressure_sensor_read(void *params)
 			int16_t raw_data = ads.getLastConversionResults();
 
 			/* Преобразуем значение давления по формуле */
-			float converted_value = raw_data * 7.8125 / 25 - pressure_shift;
+			float converted_value = raw_data * 7.8125 / 25 - pressure.get_tare();
 
 			/* Сохраняем средние значения */
 			average_sistal[counter] = converted_value;
@@ -676,7 +677,8 @@ void task_pressure_sensor_read(void *params)
 				float average_value = pressure_sum / 5;
 
 				/* Душим скачки давления */
-				pressure += (average_value - pressure) * k;
+				float pressure_tmp = (average_value - pressure.get_value()) * k;
+				pressure.set_value(pressure.get_value() + pressure_tmp);
 
 				pressure_sum = 0;
 
@@ -690,7 +692,7 @@ void task_pressure_sensor_read(void *params)
 						pump.start();
 					}
 
-					set_PID(pressure);
+					set_PID(pressure.get_value());
 				}
 				/* Во втором режиме просто шарашим на полную */
 				else if (regime_state == Regime::REGIME2)
@@ -829,18 +831,18 @@ void task_handle_error(void *params)
 
 		if (regime_state == Regime::REGIME1)
 		{
-			if (!is_pressure_stabilized)
+			if (!is_system_stabilized)
 			{
-				if (pressure >= target_pressure_value)
+				if (pressure.get_value() >= pressure.get_target())
 				{
-					is_pressure_stabilized = true;
+					is_system_stabilized = true;
 				}
 			}
 		}
 
-		if (is_pressure_stabilized and regime_state == Regime::REGIME1)
+		if (is_system_stabilized and regime_state == Regime::REGIME1)
 		{
-			if (pressure > PRESSURE_OPTIMAL_HIGH_LIMIT)
+			if (pressure.get_value() > pressure.get_optimal_high_limit())
 			{
 				alert[AlertType::PRESSURE_UP] = true;
 				alert[AlertType::PRESSURE_HIGH] = false;
@@ -851,7 +853,7 @@ void task_handle_error(void *params)
 				alert[AlertType::PRESSURE_UP] = false;
 			}
 
-			if (pressure < PRESSURE_LOW_LIMIT)
+			if (pressure.get_value() < pressure.get_low_limit())
 			{
 				// pump.stop();
 				// regime_state = Regime::STOPED;
@@ -870,7 +872,7 @@ void task_handle_error(void *params)
 				alert[AlertType::PRESSURE_LOW] = false;
 			}
 
-			if (pressure > PRESSURE_HIGH_LIMIT)
+			if (pressure.get_value() > pressure.get_high_limit())
 			{
 				pump.stop();
 				// regime_state = Regime::STOPED;
@@ -891,7 +893,8 @@ void task_handle_error(void *params)
 				alert[AlertType::PRESSURE_HIGH] = false;
 			}
 
-			if (pressure > 28 and pressure < 40)
+			if (pressure.get_value() > pressure.get_low_limit() 
+				and pressure.get_value() < pressure.get_high_limit())
 			{
 				alert[AlertType::PRESSURE_HIGH] = false;
 				alert[AlertType::PRESSURE_LOW] = false;

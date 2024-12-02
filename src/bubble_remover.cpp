@@ -23,7 +23,7 @@ void BubbleRemover::start(Regime& regime_state) {
     digitalWrite(Pin::MOSFET_pin, HIGH);
 
     /* Меняем режим на продувку на минуту */
-    regime_state = Regime::REGIME_REMOVE_KEBAB;
+    regime_state = Regime::REGIME_REMOVE_BUBBLE;
 
     /* Запускаем таймер на минуту */
     Timer3.restart();

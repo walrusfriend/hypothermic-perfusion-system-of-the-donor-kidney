@@ -21,10 +21,6 @@ namespace Pin {
     const uint8_t MOSFET_pin = 36;
 };
 
-namespace Pressure {
-
-};
-
 enum Regime
 {
 	STOPED,

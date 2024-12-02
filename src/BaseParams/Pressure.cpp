@@ -10,32 +10,47 @@ Pressure::Pressure()
 {
 }
 
-void Pressure::set_tare(const int &tare)
+void Pressure::set_tare(const float &tare)
 {
     tare_value = tare;
 }
 
-inline const int &Pressure::get_tare()
+const float &Pressure::get_tare()
 {
     return tare_value;
 }
 
-void Pressure::set_target(const int &target)
+void Pressure::set_target(const float &target)
 {
     target_value = target;
+    low_limit = target - 1;
+    optimal_high_limit = target + 1;
+	high_limit = target + 10;
 }
 
-inline const int &Pressure::get_target()
+const float &Pressure::get_target()
 {
     return target_value;
 }
 
-void Pressure::set_value(const int &value)
+void Pressure::set_value(const float &value)
 {
     current_value = value;
 }
 
-inline const int &Pressure::get_value()
+const float &Pressure::get_value()
 {
     return current_value;
+}
+
+const float& Pressure::get_low_limit() {
+    return low_limit;
+}
+
+const float& Pressure::get_optimal_high_limit() {
+    return optimal_high_limit;
+}
+
+const float& Pressure::get_high_limit() {
+    return high_limit;
 }

@@ -7,22 +7,26 @@ class Pressure {
 public:
     Pressure();
 
-    void set_tare(const int& tare);
-    inline const int& get_tare();
+    void set_tare(const float& tare);
+    const float& get_tare();
 
-    void set_target(const int& target);
-    inline const int& get_target();
+    void set_target(const float& target);
+    const float& get_target();
 
-    void set_value(const int& value);
-    inline const int& get_value();
+    void set_value(const float& value);
+    const float& get_value();
+
+    const float& get_low_limit();
+    const float& get_optimal_high_limit();
+    const float& get_high_limit();
 
 private:
-	int target_value;
-	int low_limit;
-	int optimal_high_limit;
-	int high_limit;
-	int tare_value;
-	int current_value;
+	float target_value;
+	float low_limit;
+	float optimal_high_limit;
+	float high_limit;
+	float tare_value;
+	float current_value;
 };
 
 #endif
