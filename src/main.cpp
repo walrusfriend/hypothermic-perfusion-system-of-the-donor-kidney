@@ -789,14 +789,14 @@ void task_process_buttons(void *params)
 
 	for (;;)
 	{
-		if (!is_blocked or is_system_blocked)
-		{
-			check_button(Pin::regime1);
-			check_button(Pin::regime2);
-			check_button(Pin::calibration);
-			check_button(Pin::kidney);
-		}
-		check_button(Pin::block);
+		// if (!is_blocked or is_system_blocked)
+		// {
+		// 	check_button(Pin::regime1);
+		// 	check_button(Pin::regime2);
+		// 	check_button(Pin::calibration);
+		// 	check_button(Pin::kidney);
+		// }
+		// check_button(Pin::block);
 
 		vTaskDelay(100 / 16);
 	}
@@ -990,12 +990,12 @@ void task_temperature_sensor(void *params)
 
 		if (sensor1.readTemp())
 			temperature1 = sensor1.getTemp();
-		else
+		// else 
 			// Serial.println("error");
 
 		if (sensor2.readTemp())
 			temperature2 = sensor2.getTemp();
-		else
+		// else
 			// Serial.println("error");
 
 		vTaskDelay(1000 / 16);
