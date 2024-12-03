@@ -31,6 +31,7 @@ void start_handler(const String& str);
 void pause_handler(const String& str);
 void stop_handler(const String& str);
 void regime_handler(const String& str);
+void emulate_bubble_handler(const String& str);
 
 void set_PID(const float &value);
 void check_button(const uint8_t &button_number);
@@ -131,7 +132,8 @@ bool is_system_stabilized = false;
  * Add peripheral status byte
  * 16 + 3 + 1 + 1 + 1 = 22 + \n = 23
  */
-const uint8_t TO_SEND_ARRAY_SIZE = 23;
+// const uint8_t TO_SEND_ARRAY_SIZE = 23;
+const uint8_t TO_SEND_ARRAY_SIZE = 27;
 uint8_t to_send[TO_SEND_ARRAY_SIZE];
 
 static const Command command_list[] = {
@@ -142,7 +144,8 @@ static const Command command_list[] = {
 	Command("set_speed", set_pump_rotation_speed_handler),
 	Command("tare_pressure", tare_pressure_handler),
 	Command("set_perfusion_speed_ratio", set_perfusion_speed_ratio_handler),
-	Command("set_tv", set_tv)
+	Command("set_tv", set_tv),
+	Command("emulate_bubble", emulate_bubble_handler)
 };
 
 void task_pressure_sensor_read(void *params);
@@ -209,7 +212,7 @@ void set_pump_rotation_speed_handler(const String &str)
 	if (LF_idx > str.length())
 	{
 		// Serial.println("ERROR: LF index are more than string size!");
-		LF_idx = str.length() - 1;
+		LF_idx = str.length();
 		// return;
 	}
 
@@ -222,6 +225,11 @@ void set_pump_rotation_speed_handler(const String &str)
 	String float_str = str.substring(space_idx + 1, LF_idx);
 
 	float pump_rpm = float_str.toFloat();
+
+	if (pump_rpm > 100.) {
+		/** TODO: Add error reply */
+		return;
+	}
 
 	/** TODO: Add command reply to Qt program */
 
@@ -250,7 +258,7 @@ void set_perfusion_speed_ratio_handler(const String& str) {
 	if (LF_idx > str.length())
 	{
 		// Serial.println("ERROR: LF index are more than string size!");
-		LF_idx = str.length() - 1;
+		LF_idx = str.length();
 		// return;
 	}
 
@@ -285,9 +293,17 @@ void set_tv(const String &str)
 {
 	int space_idx = str.indexOf(' ');
 
-	String target_value = str.substring(space_idx + 1, str.length() - 1);
+	String target_value = str.substring(space_idx + 1, str.length());
 	pressure.set_target(target_value.toInt());
 	pid.setpoint = pressure.get_target();
+
+	Timer4.stop();
+	is_error_timer_start = false;
+
+	error_timer_mins = 0;
+	error_timer_secs = 0;
+
+	is_system_stabilized = false;
 }
 
 
@@ -320,6 +336,10 @@ void regime_handler(const String& message) {
 	if (isDigit(input_regime)) {
 		regime_state = static_cast<Regime>(input_regime - '0');
 	}
+}
+
+void emulate_bubble_handler(const String& str) {
+	bubble_remover.start(regime_state);
 }
 
 void set_PID(const float &value)
@@ -526,6 +546,11 @@ ISR(TIMER5_A)
 	uint8_t peripheral_status_byte = peripheral_status.pack_to_byte();
 	*(p_writer++) = peripheral_status_byte;
 
+	magic = ((uint8_t*)(&pressure.get_target()));
+	for(uint8_t i = 0; i < 4; i++) {
+		*(p_writer++) = magic[i];
+	}
+
 	++time;
 
 	/** TODO: Add messages to queue and send it to COM port outside of the interrupt */
@@ -546,6 +571,7 @@ ISR(TIMER4_A)
 	{
 		// Block the system
 		is_system_blocked = true;
+		regime_state = Regime::BLOCKED;
 		pump.stop();
 	}
 }
@@ -558,8 +584,8 @@ ISR(TIMER3_A)
 	 * По прошествии минуты обнуляем таймер и 
 	 * возвращаемся к нормальному режиму работы 
 	 */
-	// if (remove_bubble_secs >= 60) {
-	if (remove_bubble_secs >= 5) {
+	if (remove_bubble_secs >= 60) {
+	// if (remove_bubble_secs >= 5) {
 		bubble_remover.stop(regime_state);
 		remove_bubble_secs = 0;
 		regime_state = Regime::REGIME1;
@@ -739,11 +765,11 @@ void task_pump_control(void *params)
 {
 	for (;;)
 	{
-		if (is_system_blocked)
-		{
-			vTaskDelay(1000);
-			continue;
-		}
+		// if (is_system_blocked)
+		// {
+		// 	vTaskDelay(1000);
+		// 	continue;
+		// }
 
 		peripheral_status.is_pump_online = pump.check_timeout();
 
@@ -820,6 +846,7 @@ void task_handle_error(void *params)
 	// the system, if pressure fall below HIGH, stop the timer
 	Timer4.setFrequency(1);
 	Timer4.enableISR();
+	Timer4.stop();
 
 	for (;;)
 	{
@@ -902,6 +929,9 @@ void task_handle_error(void *params)
 
 				Timer4.stop();
 				is_error_timer_start = false;
+
+				error_timer_mins = 0;
+				error_timer_secs = 0;
 
 				if (is_pressure_high_beat) {
 					pump.start();

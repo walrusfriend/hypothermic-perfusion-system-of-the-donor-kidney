@@ -26,7 +26,8 @@ enum Regime
 	STOPED,
 	REGIME1,
 	REGIME2,
-    REGIME_REMOVE_BUBBLE
+    REGIME_REMOVE_BUBBLE,
+	BLOCKED
 };
 
 enum KidneyState
