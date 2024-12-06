@@ -32,6 +32,8 @@ void pause_handler(const String& str);
 void stop_handler(const String& str);
 void regime_handler(const String& str);
 void emulate_bubble_handler(const String& str);
+void temp_low_limit_handler(const String& str);
+void temp_high_limit_handler(const String& str);
 
 void set_PID(const float &value);
 void check_button(const uint8_t &button_number);
@@ -103,8 +105,8 @@ bool is_system_blocked = false;
 bool is_error_timer_start = false;
 
 
-uint8_t TEMP_LOW_LIMIT = 4;
-uint8_t TEMP_HIGH_LIMIT = 10;
+float TEMP_LOW_LIMIT = 4;
+float TEMP_HIGH_LIMIT = 10;
 
 bool is_system_stabilized = false;
 
@@ -145,7 +147,9 @@ static const Command command_list[] = {
 	Command("tare_pressure", tare_pressure_handler),
 	Command("set_perfusion_speed_ratio", set_perfusion_speed_ratio_handler),
 	Command("set_tv", set_tv),
-	Command("emulate_bubble", emulate_bubble_handler)
+	Command("emulate_bubble", emulate_bubble_handler),
+	Command("temp_high_limit", temp_high_limit_handler),
+	Command("temp_low_limit", temp_low_limit_handler)
 };
 
 void task_pressure_sensor_read(void *params);
@@ -340,6 +344,20 @@ void regime_handler(const String& message) {
 
 void emulate_bubble_handler(const String& str) {
 	bubble_remover.start(regime_state);
+}
+
+void temp_low_limit_handler(const String& str) {
+	int space_idx = str.indexOf(' ');
+
+	String value = str.substring(space_idx + 1, str.length());
+	TEMP_LOW_LIMIT = value.toFloat();
+}
+
+void temp_high_limit_handler(const String& str) {
+	int space_idx = str.indexOf(' ');
+
+	String value = str.substring(space_idx + 1, str.length());
+	TEMP_HIGH_LIMIT = value.toFloat();
 }
 
 void set_PID(const float &value)
